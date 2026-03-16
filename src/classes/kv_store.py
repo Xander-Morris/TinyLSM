@@ -1,12 +1,14 @@
 import glob
 import os 
 import config 
+import bloom_filter
 
 class KVStore:
     def __init__(self):
         self._store = {}
         self.entries = 0
         self.index_counter = 0
+        self.bloom_filters = {}
         self._load_sstables()
 
     # Private Methods
@@ -97,6 +99,17 @@ class KVStore:
         self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
         sorted_store = sorted(self._store.items())
         self._write_to_sstable_file(self.index_counter, sorted_store)
+        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
+
+        for key, value in self._store: 
+            if value == config.TOMBSTONE_VALUE:
+                continue 
+        
+            filter.add(key)
+
+        with open(f"sst_{self.index_counter}.bloom", 'w') as file:
+            file.write(filter.serialize())
+
         self._store = {}
         self.entries = 0 
 
