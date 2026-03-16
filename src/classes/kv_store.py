@@ -14,8 +14,7 @@ class KVStore:
     def set(self, key: str, value: str):
         with open(self.log_file_name, 'a') as file:
             file.write(f"SET {key} {value}\n")
-            file.close()
-            self._set(key, value)
+        self._set(key, value)
 
     def get(self, key: str):
         return self._store.get(key)
@@ -23,5 +22,4 @@ class KVStore:
     def delete(self, key: str):
         with open(self.log_file_name, 'a') as file:
             file.write(f"DELETE {key}\n")
-            file.close()
-            self._delete(key)
+        self._delete(key)
