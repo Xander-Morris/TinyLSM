@@ -4,10 +4,22 @@ class KVStore:
         self.log_file_name = log_file_name 
         self.max_entries = max_entries
         self.entries = 0
+        self.index_counter = 0
 
     # Private Methods
     def _flush(self):
+        self.index_counter += 1
+        sorted_store = sorted(self._store)
 
+        with open(f"sst_{self.index_counter}", 'a') as file: 
+            for key in sorted_store:
+                file.write(f"{key} {sorted_store[key]}")
+        
+        self._store = {}
+        self.entries = 0 
+
+        with open(self.log_file_name, 'w') as file:
+            file.write("")
 
     def _set(self, key: str, value: str):
         prev_value = self._store.get(key)
