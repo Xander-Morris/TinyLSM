@@ -1,3 +1,5 @@
+import glob 
+
 class KVStore:
     def __init__(self, log_file_name, max_entries):
         self._store = {}
@@ -5,8 +7,16 @@ class KVStore:
         self.max_entries = max_entries
         self.entries = 0
         self.index_counter = 0
+        self._load_sstables()
 
     # Private Methods
+    def _load_sstables(self):
+        sst_files = glob.glob("sst_*") 
+        sorted_files = sorted(sst_files, key=lambda f: int(f.split("_")[1])) # gets the index counter, like in sst_3, we get 3 and sort by that index with respect to the other files
+
+        for file in sorted_files:
+            print(file)
+
     def _flush(self):
         self.index_counter += 1
         sorted_store = sorted(self._store.items())

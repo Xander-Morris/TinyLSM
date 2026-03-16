@@ -1,2 +1,8 @@
 SET apple 3
 DELETE apple
+SET dog 5
+SET chicken 6
+SET xander 2
+SET sadie 4
+SET brenda 6
+SET mom 8
