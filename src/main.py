@@ -2,7 +2,7 @@ import config
 from classes import kv_store 
 
 def main():
-    store = kv_store.KVStore(config.LOG_FILE_NAME)
+    store = kv_store.KVStore(config.LOG_FILE_NAME, config.MAX_ENTRIES)
 
     try:
         with open(config.LOG_FILE_NAME, 'r') as file:
