@@ -5,7 +5,7 @@ class KVStore:
 
     def set(self, key: str, value: str):
         try:
-            with open(self.log_file_name, 'w') as file:
+            with open(self.log_file_name, 'a') as file:
                 file.write(f"SET {key} {value}")
                 file.close()
                 self._store[key] = value
@@ -17,7 +17,7 @@ class KVStore:
 
     def delete(self, key: str):
         try:
-            with open(self.log_file_name, 'w') as file:
+            with open(self.log_file_name, 'a') as file:
                 file.write(f"DELETE {key}")
                 file.close()
                 self._store[key] = None
