@@ -52,7 +52,7 @@ def main():
             if result is not None:
                 print(result)
     except KeyboardInterrupt:
-
+        pass
 
 if __name__ == "__main__":
     main()
