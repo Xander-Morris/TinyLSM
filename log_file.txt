@@ -1,2 +1,0 @@
-SET walla 1919
-SET dsfsdfsd 101010
