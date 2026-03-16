@@ -1,15 +1,42 @@
-import glob 
+import glob
+import os 
 
 class KVStore:
-    def __init__(self, log_file_name, max_entries):
+    def __init__(self, log_file_name, max_entries, max_sstables):
         self._store = {}
         self.log_file_name = log_file_name 
         self.max_entries = max_entries
+        self.max_sstables = max_sstables
         self.entries = 0
         self.index_counter = 0
         self._load_sstables()
 
     # Private Methods
+    def _write_to_sstable_file(self, index, sorted_store):
+        with open(f"sst_{index}", 'w') as file: 
+            for key, value in sorted_store:
+                if value is None: 
+                    continue
+
+                file.write(f"{key} {value}\n")
+
+    def _compact(self):
+        dict = {}
+
+        for index in range(1, self.index_counter + 1):
+            to_add = self._build_sstable_tuples(index)
+            
+            for key, value in to_add:
+                dict[key] = value 
+        
+        dict = sorted(dict.items())
+
+        for index in range(1, self.index_counter + 1):
+            os.remove(f"sst_{index}")
+        
+        self._write_to_sstable_file(1, dict) 
+        self.index_counter = 1 
+
     def _binary_search(self, tuples, key):
         low = 0
         high = len(tuples) - 1
@@ -26,17 +53,21 @@ class KVStore:
                 low = mid + 1
 
         return None
+    
+    def _build_sstable_tuples(self, index):
+        tuples = []
+
+        with open(f"sst_{index}", 'r') as file:
+            for line in file: 
+                line = line.strip() 
+                inner_key, value = line.split(" ")
+                tuples.append((inner_key, value))
+
+        return tuples
 
     def _search_sstables(self, key):
         for index in range(self.index_counter, 0, -1):
-            tuples = []
-
-            with open(f"sst_{index}", 'r') as file:
-                for line in file: 
-                    line = line.strip() 
-                    inner_key, value = line.split(" ")
-                    tuples.append((inner_key, value))
-            
+            tuples = self._build_sstable_tuples(index)
             search_result = self._binary_search(tuples, key)
 
             if search_result is not None:
@@ -64,19 +95,15 @@ class KVStore:
     def _flush(self):
         self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
         sorted_store = sorted(self._store.items())
-
-        with open(f"sst_{self.index_counter}", 'w') as file: 
-            for key, value in sorted_store:
-                if value is None: 
-                    continue
-
-                file.write(f"{key} {value}\n")
-        
+        self._write_to_sstable_file(self.index_counter, sorted_store)
         self._store = {}
         self.entries = 0 
 
         with open(self.log_file_name, 'w') as file:
             file.write("")
+
+        if self.index_counter >= self.max_sstables:
+            self._compact()
 
     def _set(self, key: str, value: str, sstable_loading=False):
         prev_value = self._store.get(key)
