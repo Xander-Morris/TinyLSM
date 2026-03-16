@@ -21,20 +21,20 @@ class KVStore:
                 file.write(f"{key} {value}\n")
 
     def _compact(self):
-        dict = {}
+        sorted_dict = {}
 
         for index in range(1, self.index_counter + 1):
             to_add = self._build_sstable_tuples(index)
             
             for key, value in to_add:
-                dict[key] = value 
+                sorted_dict[key] = value 
         
-        dict = sorted(dict.items())
+        sorted_dict = sorted(sorted_dict.items())
 
         for index in range(1, self.index_counter + 1):
             os.remove(f"sst_{index}")
         
-        self._write_to_sstable_file(1, dict) 
+        self._write_to_sstable_file(1, sorted_dict) 
         self.index_counter = 1 
 
     def _binary_search(self, tuples, key):
@@ -118,11 +118,11 @@ class KVStore:
         # Do the flush 
         self._flush()
 
-    def _delete(self, key: str):
+    def _delete(self, key: str, sstable_loading=False):
         prev_value = self._store.get(key)
         self._store[key] = None
 
-        if prev_value is not None:
+        if prev_value is not None and not sstable_loading:
             self.entries -= 1
 
     # Public Methods 

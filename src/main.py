@@ -15,7 +15,7 @@ def main():
                     if len(sp) < 3:
                         print("3 arguments are required for SET!")
                     else:
-                        store._set(sp[1], sp[2])
+                        store._set(sp[1], sp[2], True)
                 elif operation == "DELETE":
                     if len(sp) < 2:
                         print("2 arguments required for delete")
