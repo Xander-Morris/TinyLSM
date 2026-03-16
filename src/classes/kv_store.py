@@ -37,7 +37,12 @@ class KVStore:
                     inner_key, value = line.split(" ")
                     tuples.append((inner_key, value))
             
-            return self._binary_search(tuples, key)
+            search_result = self._binary_search(tuples, key)
+
+            if search_result:
+                return search_result
+        
+        return None 
 
     def _load_sstables(self):
         sst_file_names = glob.glob("sst_*") 
@@ -101,11 +106,9 @@ class KVStore:
 
     def get(self, key: str):
         if key in self._store:
-            self._store.get(key)
+            return self._store.get(key)
         else:
             return self._search_sstables(key)
-            
-        return None
 
     def delete(self, key: str):
         with open(self.log_file_name, 'a') as file:
