@@ -1,2 +1,2 @@
-APPEND 2
-DELETE 3
+SET apple 3
+DELETE apple
