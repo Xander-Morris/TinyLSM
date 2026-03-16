@@ -16,13 +16,13 @@ class KVStore:
         index_counter = 0
 
         for file_name in sorted_file_names:
-            index_counter = file_name.split("_")[1] 
+            index_counter = int(file_name.split("_")[1])
 
             with open(file_name, 'r') as file:
                 for line in file: 
                     line = line.strip() 
                     key, value = line.split(" ")
-                    self._set(key, value)
+                    self._set(key, value, True)
 
         self.index_counter = index_counter
 
@@ -43,14 +43,14 @@ class KVStore:
         with open(self.log_file_name, 'w') as file:
             file.write("")
 
-    def _set(self, key: str, value: str):
+    def _set(self, key: str, value: str, skip_flush=False):
         prev_value = self._store.get(key)
         self._store[key] = value 
 
         if prev_value is None:
             self.entries += 1
         
-        if self.entries < self.max_entries:
+        if self.entries < self.max_entries or skip_flush:
             return 
 
         # Do the flush 
