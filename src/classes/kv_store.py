@@ -43,14 +43,14 @@ class KVStore:
         with open(self.log_file_name, 'w') as file:
             file.write("")
 
-    def _set(self, key: str, value: str, skip_flush=False):
+    def _set(self, key: str, value: str, sstable_loading=False):
         prev_value = self._store.get(key)
         self._store[key] = value 
 
-        if prev_value is None:
+        if prev_value is None and not sstable_loading:
             self.entries += 1
         
-        if self.entries < self.max_entries or skip_flush:
+        if self.entries < self.max_entries or sstable_loading:
             return 
 
         # Do the flush 
