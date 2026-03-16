@@ -33,8 +33,22 @@ class KVStore:
 
         for index in range(1, self.index_counter + 1):
             os.remove(f"sst_{index}")
+            os.remove(f"sst_{index}.bloom")
         
         self._write_to_sstable_file(1, sorted_dict) 
+        self.bloom_filters = {}
+        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
+
+        for key, value in sorted_dict:
+            if value == config.TOMBSTONE_VALUE:
+                continue 
+
+            filter.add(key)
+        
+        with open("sst_1.bloom", 'w') as file: 
+            file.write(filter.serialize())
+
+        self.bloom_filters[1] = filter 
         self.index_counter = 1 
 
     def _binary_search(self, tuples, key):
@@ -67,6 +81,9 @@ class KVStore:
 
     def _search_sstables(self, key):
         for index in range(self.index_counter, 0, -1):
+            if not self.bloom_filters[index].contains(key):
+                continue 
+
             tuples = self._build_sstable_tuples(index)
             search_result = self._binary_search(tuples, key)
 
@@ -91,6 +108,10 @@ class KVStore:
                     line = line.strip() 
                     key, value = line.split(" ")
                     self._set(key, value, True)
+            
+            with open(f"sst_{index_counter}.bloom", 'r') as file: 
+                line = file.read() 
+                self.bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(line)
 
         self.index_counter = index_counter
         self.entries = sum(1 for v in self._store.values() if v is not config.TOMBSTONE_VALUE and v is not None)
@@ -101,7 +122,7 @@ class KVStore:
         self._write_to_sstable_file(self.index_counter, sorted_store)
         filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
 
-        for key, value in self._store: 
+        for key, value in self._store.items(): 
             if value == config.TOMBSTONE_VALUE:
                 continue 
         
