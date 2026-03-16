@@ -12,8 +12,8 @@ class KVStore:
         sorted_store = sorted(self._store.items())
 
         with open(f"sst_{self.index_counter}", 'w') as file: 
-            for key in sorted_store:
-                file.write(f"{key} {sorted_store[key]}\n")
+            for key, value in sorted_store:
+                file.write(f"{key} {value}\n")
         
         self._store = {}
         self.entries = 0 
