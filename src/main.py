@@ -20,7 +20,7 @@ def main():
                     if len(sp) < 2:
                         print("2 arguments required for delete")
                     else:
-                        store._delete(sp[1])
+                        store._delete(sp[1], True)
                 else:
                     print(f"Invalid operation: {operation}!")
             file.close()
