@@ -26,7 +26,7 @@ def process_line(store, line, replay=False):
         if len(sp) < 2:
             print("2 arguments are required for GET!")
         else:
-            return store.get(sp[1])
+            return f"Key {sp[1]} has value of {store.get(sp[1])}"
     else:
         print(f"Invalid operation: {operation}!")
 
