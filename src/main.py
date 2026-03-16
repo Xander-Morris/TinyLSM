@@ -31,7 +31,7 @@ def process_line(store, line, replay=False):
         print(f"Invalid operation: {operation}!")
 
 def main():
-    store = kv_store.KVStore(config.LOG_FILE_NAME, config.MAX_ENTRIES, config.MAX_SSTABLES)
+    store = kv_store.KVStore()
 
     try:
         with open(config.LOG_FILE_NAME, 'r') as file:

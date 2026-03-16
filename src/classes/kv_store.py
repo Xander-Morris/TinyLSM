@@ -1,12 +1,10 @@
 import glob
 import os 
+import config 
 
 class KVStore:
-    def __init__(self, log_file_name, max_entries, max_sstables):
+    def __init__(self):
         self._store = {}
-        self.log_file_name = log_file_name 
-        self.max_entries = max_entries
-        self.max_sstables = max_sstables
         self.entries = 0
         self.index_counter = 0
         self._load_sstables()
@@ -15,9 +13,6 @@ class KVStore:
     def _write_to_sstable_file(self, index, sorted_store):
         with open(f"sst_{index}", 'w') as file: 
             for key, value in sorted_store:
-                if value is None: 
-                    continue
-
                 file.write(f"{key} {value}\n")
 
     def _compact(self):
@@ -27,6 +22,9 @@ class KVStore:
             to_add = self._build_sstable_tuples(index)
             
             for key, value in to_add:
+                if value == config.TOMBSTONE_VALUE:
+                    continue 
+
                 sorted_dict[key] = value 
         
         sorted_dict = sorted(sorted_dict.items())
@@ -70,6 +68,9 @@ class KVStore:
             tuples = self._build_sstable_tuples(index)
             search_result = self._binary_search(tuples, key)
 
+            if search_result == config.TOMBSTONE_VALUE:
+                return None 
+
             if search_result is not None:
                 return search_result
         
@@ -99,10 +100,10 @@ class KVStore:
         self._store = {}
         self.entries = 0 
 
-        with open(self.log_file_name, 'w') as file:
+        with open(config.LOG_FILE_NAME, 'w') as file:
             file.write("")
 
-        if self.index_counter >= self.max_sstables:
+        if self.index_counter >= config.MAX_SSTABLES:
             self._compact()
 
     def _set(self, key: str, value: str, sstable_loading=False):
@@ -112,7 +113,7 @@ class KVStore:
         if value is not None and prev_value is None and not sstable_loading:
             self.entries += 1
         
-        if self.entries < self.max_entries or sstable_loading:
+        if self.entries < config.MAX_ENTRIES or sstable_loading:
             return 
 
         # Do the flush 
@@ -120,24 +121,28 @@ class KVStore:
 
     def _delete(self, key: str, sstable_loading=False):
         prev_value = self._store.get(key)
-        self._store[key] = None
+        self._store[key] = config.TOMBSTONE_VALUE
 
         if prev_value is not None and not sstable_loading:
             self.entries -= 1
 
     # Public Methods 
     def set(self, key: str, value: str):
-        with open(self.log_file_name, 'a') as file:
+        with open(config.LOG_FILE_NAME, 'a') as file:
             file.write(f"SET {key} {value}\n")
         self._set(key, value)
 
     def get(self, key: str):
+        raw_value = None
+
         if key in self._store:
-            return self._store.get(key)
+            raw_value = self._store.get(key)
         else:
-            return self._search_sstables(key)
+            raw_value = self._search_sstables(key)
+        
+        return None if raw_value == config.TOMBSTONE_VALUE else raw_value
 
     def delete(self, key: str):
-        with open(self.log_file_name, 'a') as file:
+        with open(config.LOG_FILE_NAME, 'a') as file:
             file.write(f"DELETE {key}\n")
         self._delete(key)
