@@ -6,6 +6,3 @@ dotenv.load_dotenv()
 LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "log_file.txt")
 MAX_ENTRIES = int(os.getenv("MAX_ENTRIES", 10))
 MAX_SSTABLES = int(os.getenv("MAX_SSTABLES", 20))
-
-print(MAX_ENTRIES)
-print(MAX_SSTABLES)
