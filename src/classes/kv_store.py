@@ -13,6 +13,9 @@ class KVStore:
     def _write_to_sstable_file(self, index, sorted_store):
         with open(f"sst_{index}", 'w') as file: 
             for key, value in sorted_store:
+                if value == config.TOMBSTONE_VALUE: 
+                    continue 
+
                 file.write(f"{key} {value}\n")
 
     def _compact(self):
@@ -22,9 +25,6 @@ class KVStore:
             to_add = self._build_sstable_tuples(index)
             
             for key, value in to_add:
-                if value == config.TOMBSTONE_VALUE:
-                    continue 
-
                 sorted_dict[key] = value 
         
         sorted_dict = sorted(sorted_dict.items())
