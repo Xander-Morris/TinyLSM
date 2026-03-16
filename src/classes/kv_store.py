@@ -9,11 +9,11 @@ class KVStore:
     # Private Methods
     def _flush(self):
         self.index_counter += 1
-        sorted_store = sorted(self._store)
+        sorted_store = sorted(self._store.items())
 
-        with open(f"sst_{self.index_counter}", 'a') as file: 
+        with open(f"sst_{self.index_counter}", 'w') as file: 
             for key in sorted_store:
-                file.write(f"{key} {sorted_store[key]}")
+                file.write(f"{key} {sorted_store[key]}\n")
         
         self._store = {}
         self.entries = 0 
@@ -25,7 +25,7 @@ class KVStore:
         prev_value = self._store.get(key)
         self._store[key] = value 
 
-        if not prev_value:
+        if prev_value is None:
             self.entries += 1
         
         if self.entries < self.max_entries:
@@ -38,7 +38,7 @@ class KVStore:
         prev_value = self._store.get(key)
         self._store[key] = None
 
-        if prev_value:
+        if prev_value is not None:
             self.entries -= 1
 
     # Public Methods 
