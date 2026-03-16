@@ -39,7 +39,7 @@ class KVStore:
             
             search_result = self._binary_search(tuples, key)
 
-            if search_result:
+            if search_result is not None:
                 return search_result
         
         return None 
