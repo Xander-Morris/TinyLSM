@@ -11,14 +11,23 @@ class KVStore:
 
     # Private Methods
     def _load_sstables(self):
-        sst_files = glob.glob("sst_*") 
-        sorted_files = sorted(sst_files, key=lambda f: int(f.split("_")[1])) # gets the index counter, like in sst_3, we get 3 and sort by that index with respect to the other files
+        sst_file_names = glob.glob("sst_*") 
+        sorted_file_names = sorted(sst_file_names, key=lambda f: int(f.split("_")[1])) # gets the index counter, like in sst_3, we get 3 and sort by that index with respect to the other files
+        index_counter = 0
 
-        for file in sorted_files:
-            print(file)
+        for file_name in sorted_file_names:
+            index_counter = file_name.split("_")[1] 
+
+            with open(file_name, 'r') as file:
+                for line in file: 
+                    line = line.strip() 
+                    key, value = line.split(" ")
+                    self._set(key, value)
+
+        self.index_counter = index_counter
 
     def _flush(self):
-        self.index_counter += 1
+        self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
         sorted_store = sorted(self._store.items())
 
         with open(f"sst_{self.index_counter}", 'w') as file: 
