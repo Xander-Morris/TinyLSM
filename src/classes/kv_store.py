@@ -131,6 +131,7 @@ class KVStore:
         with open(f"sst_{self.index_counter}.bloom", 'w') as file:
             file.write(filter.serialize())
 
+        self.bloom_filters[self.index_counter] = filter 
         self._store = {}
         self.entries = 0 
 
