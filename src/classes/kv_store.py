@@ -13,6 +13,9 @@ class KVStore:
 
         with open(f"sst_{self.index_counter}", 'w') as file: 
             for key, value in sorted_store:
+                if value is None: 
+                    continue
+
                 file.write(f"{key} {value}\n")
         
         self._store = {}
