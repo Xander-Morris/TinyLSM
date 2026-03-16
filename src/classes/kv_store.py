@@ -124,8 +124,8 @@ class KVStore:
 
         for key, value in self._store.items(): 
             if value == config.TOMBSTONE_VALUE:
-                continue 
-        
+                continue
+
             filter.add(key)
 
         with open(f"sst_{self.index_counter}.bloom", 'w') as file:
