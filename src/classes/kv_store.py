@@ -91,7 +91,7 @@ class KVStore:
                     self._set(key, value, True)
 
         self.index_counter = index_counter
-        self.entries = sum(1 for v in self._store.values() if v is not None)
+        self.entries = sum(1 for v in self._store.values() if v is not config.TOMBSTONE_VALUE and v is not None)
 
     def _flush(self):
         self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
