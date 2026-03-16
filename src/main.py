@@ -2,7 +2,7 @@ import config
 from classes import kv_store 
 
 def main():
-    store = kv_store.KVStore()
+    store = kv_store.KVStore(config.LOG_FILE_NAME)
 
     try:
         with open(config.LOG_FILE_NAME, 'r') as file:
@@ -15,12 +15,12 @@ def main():
                     if len(sp) < 3:
                         print("3 arguments are required for SET!")
                     else:
-                        store.set(sp[1], sp[2])
+                        store._set(sp[1], sp[2])
                 elif operation == "DELETE":
                     if len(sp) < 2:
                         print("2 arguments required for delete")
                     else:
-                        store.delete(sp[1])
+                        store._delete(sp[1])
                 else:
                     print(f"Invalid operation: {operation}!")
             file.close()
