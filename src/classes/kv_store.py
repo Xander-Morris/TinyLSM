@@ -10,6 +10,35 @@ class KVStore:
         self._load_sstables()
 
     # Private Methods
+    def _binary_search(self, tuples, key):
+        low = 0
+        high = len(tuples) - 1
+
+        while low <= high: 
+            mid = (low + high) // 2
+            key_at_mid = tuples[mid][0]
+
+            if key == key_at_mid:
+                return tuples[mid][1] # return value 
+            elif key < key_at_mid:
+                high = mid - 1
+            else:
+                low = mid + 1
+
+        return None
+
+    def _search_sstables(self, key):
+        for index in range(self.index_counter, 0, -1):
+            tuples = []
+
+            with open(f"sst_{index}", 'r') as file:
+                for line in file: 
+                    line = line.strip() 
+                    inner_key, value = line.split(" ")
+                    tuples.append((inner_key, value))
+            
+            return self._binary_search(tuples, key)
+
     def _load_sstables(self):
         sst_file_names = glob.glob("sst_*") 
         sorted_file_names = sorted(sst_file_names, key=lambda f: int(f.split("_")[1])) # gets the index counter, like in sst_3, we get 3 and sort by that index with respect to the other files
@@ -71,7 +100,12 @@ class KVStore:
         self._set(key, value)
 
     def get(self, key: str):
-        return self._store.get(key)
+        if key in self._store:
+            self._store.get(key)
+        else:
+            return self._search_sstables(key)
+            
+        return None
 
     def delete(self, key: str):
         with open(self.log_file_name, 'a') as file:
