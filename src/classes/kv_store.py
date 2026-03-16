@@ -25,6 +25,7 @@ class KVStore:
                     self._set(key, value, True)
 
         self.index_counter = index_counter
+        self.entries = sum(1 for v in self._store.values() if v is not None)
 
     def _flush(self):
         self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
@@ -47,7 +48,7 @@ class KVStore:
         prev_value = self._store.get(key)
         self._store[key] = value 
 
-        if prev_value is None and not sstable_loading:
+        if value is not None and prev_value is None and not sstable_loading:
             self.entries += 1
         
         if self.entries < self.max_entries or sstable_loading:
