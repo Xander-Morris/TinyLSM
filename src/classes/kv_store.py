@@ -12,22 +12,16 @@ class KVStore:
 
     # Public Methods 
     def set(self, key: str, value: str):
-        try:
-            with open(self.log_file_name, 'a') as file:
-                file.write(f"SET {key} {value}\n")
-                file.close()
-                self._set(key, value)
-        except:
-            print("No file exists!")
+        with open(self.log_file_name, 'a') as file:
+            file.write(f"SET {key} {value}\n")
+            file.close()
+            self._set(key, value)
 
     def get(self, key: str):
         return self._store.get(key)
 
     def delete(self, key: str):
-        try:
-            with open(self.log_file_name, 'a') as file:
-                file.write(f"DELETE {key}\n")
-                file.close()
-                self._delete(key)
-        except:
-            print("No file exists!")
+        with open(self.log_file_name, 'a') as file:
+            file.write(f"DELETE {key}\n")
+            file.close()
+            self._delete(key)
