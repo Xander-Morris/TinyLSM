@@ -3,11 +3,11 @@ import config
 class BloomFilter: 
     # Static Methods
     @staticmethod
-    def deserialize(str):
-        filter = BloomFilter(len(str))
+    def deserialize(data):
+        filter = BloomFilter(len(data))
         index = 0
 
-        for char in str: 
+        for char in data: 
             i = int(char) 
             filter.bits[index] = i 
             index += 1
@@ -33,4 +33,4 @@ class BloomFilter:
         return True
     
     def serialize(self):
-        return "".join(self.bits)
+        return "".join(str(b) for b in self.bits)
