@@ -97,11 +97,17 @@ class KVStore:
             self._update_manifest(level + 1, f"sst_{self.index_counter}", chunk[0][0], chunk[-1][0])
 
     def _compact(self):
-        self._compact_level(0)
-        l1_entries = sum([entry for entry in self.manifest.entries if entry["level"] == 1])
+        level = 0
 
-        if l1_entries > config.MAX_L1_FILES:
-            self._compact_level(1)
+        while True:
+            self._compact_level(level)
+            next_entries = sum([entry for entry in self.manifest.entries if entry["level"] == level + 1])
+            level_limit = config.MAX_L0_FILES * (10 ** (level + 1))
+
+            if next_entries < level_limit: 
+                break
+            
+            level += 1
 
     def _flush(self):
         self.index_counter += 1
