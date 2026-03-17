@@ -60,6 +60,13 @@ class KVStore:
         self.manifest.add(level, file_name, min_key, max_key)
         self.manifest.save()
 
+    def _compact_level(self, level):
+        overall_min = min(entry["min_key"] for entry in entries)
+        overall_max = max(entry["max_key"] for entry in entries)
+        entries = [entry for entry in self.manifest.entries if entry["level"] == level]
+        next_entries = [entry for entry in self.manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
+        
+
     def _compact(self):
         sorted_dict = {}
 
@@ -99,7 +106,9 @@ class KVStore:
         with open(config.LOG_FILE_NAME, 'w') as file:
             file.write("")
 
-        if self.index_counter >= config.MAX_SSTABLES:
+        l0_count = sum(1 for entry in self.manifest.entries if entry["level"] == 0)
+        
+        if l0_count >= config.MAX_L0_FILES:
             self._compact()
 
     def _binary_search(self, tuples, key):
