@@ -188,3 +188,9 @@ class KVStore:
         for key, value in self._store.items():
             if key >= start and key <= end:
                 entries[key] = value 
+
+        for i in range(1, self.index_counter + 1):
+            tuples = self._build_sstable_tuples(i)
+            for key, value in tuples:
+                if key >= start and key <= end:
+                    entries[key] = value 
