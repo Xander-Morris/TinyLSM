@@ -13,11 +13,14 @@ class KVStore:
 
     # Private Methods
     def _write_to_sstable_file(self, index, sorted_store):
+
+        
         with open(f"sst_{index}", 'w') as file: 
             for key, value in sorted_store:
                 if value == config.TOMBSTONE_VALUE: 
                     continue 
 
+                offset = file.tell()
                 file.write(f"{key} {value}\n")
 
     def _write_bloom_filter(self, items, index):
