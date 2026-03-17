@@ -125,6 +125,13 @@ class KVStore:
                 return search_result
         
         return None 
+    
+    def _search_sstable_with_index(self, index, key):
+        if not self.sparse_indexes[index]:
+            print(f"No sparse index exists in the sparse_indexes dictionary for {index}!")
+            return
+
+        
 
     def _load_sstables(self):
         sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
