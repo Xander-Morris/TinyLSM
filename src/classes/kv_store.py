@@ -61,18 +61,21 @@ class KVStore:
         self.manifest.save()
 
     def _compact_level(self, level):
+        entries = [entry for entry in self.manifest.entries if entry["level"] == level]
         overall_min = min(entry["min_key"] for entry in entries)
         overall_max = max(entry["max_key"] for entry in entries)
-        entries = [entry for entry in self.manifest.entries if entry["level"] == level]
         next_entries = [entry for entry in self.manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
         merged = {}
 
-        for entry in next_entries: 
-            merged.append(entry)
-        
-        for entry in entries: 
-            merged.append(entry)
-        
+        def read_from_entries_list(entries_list):
+            for entry in entries_list:
+                index = int(entry["file_name"].split("_")[1])
+
+                for key, value in self._build_sstable_tuples(index):
+                    merged[key] = value
+
+        read_from_entries_list(next_entries) 
+        read_from_entries_list(entries)
         merged = sorted(merged.items())
 
         for entry in entries + next_entries: 
@@ -82,8 +85,8 @@ class KVStore:
             os.remove(f"sst_{index}.bloom")
             os.remove(f"sst_{index}.index")
             self.manifest.remove(entry["file_name"])
-            self.bloom_filters[index] = None 
-            self.sparse_indexes[index] = None 
+            del self.bloom_filters[index] 
+            del self.sparse_indexes[index] 
 
     def _compact(self):
         sorted_dict = {}
