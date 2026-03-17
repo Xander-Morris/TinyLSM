@@ -26,7 +26,7 @@ class KVStore:
                 if value == config.TOMBSTONE_VALUE: 
                     continue 
 
-                if not min_key: 
+                if min_key is None: 
                     min_key = key  
                 max_key = key 
                 i += 1
@@ -56,6 +56,10 @@ class KVStore:
 
         self.bloom_filters[index] = filter 
 
+    def _update_manifest(self, level, file_name, min_key, max_key):
+        self.manifest.add(level, file_name, min_key, max_key)
+        self.manifest.save()
+
     def _compact(self):
         sorted_dict = {}
 
@@ -76,7 +80,9 @@ class KVStore:
         self.bloom_filters = {}
         self.sparse_indexes = {}
         self.index_counter = 1
-        self.sparse_indexes[1] = self._write_to_sstable_file(1, sorted_dict)[0] 
+        write_result = self._write_to_sstable_file(self.index_counter, sorted_dict)
+        self.sparse_indexes[1] = write_result[0] 
+        self._update_manifest(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
         self._write_bloom_filter(sorted_dict, 1)
 
     def _flush(self):
@@ -84,8 +90,7 @@ class KVStore:
         sorted_store = sorted(self._store.items())
         write_result = self._write_to_sstable_file(self.index_counter, sorted_store)
         self.sparse_indexes[self.index_counter] = write_result[0]
-        self.manifest.add(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
-        self.manifest.save()
+        self._update_manifest(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
         self._write_bloom_filter(self._store.items(), self.index_counter)
         self._store = {}
         self.entries = 0 
