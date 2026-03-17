@@ -88,8 +88,10 @@ class KVStore:
             del self.bloom_filters[index] 
             del self.sparse_indexes[index] 
 
-        for i in range(0, len(merged), config.SSTABLE_FILE_SIZE):
-            chunk = merged[i:i + config.SSTABLE_FILE_SIZE]
+        sstable_file_size = config.MAX_L0_FILES * (10 ** level)
+
+        for i in range(0, len(merged), sstable_file_size):
+            chunk = merged[i:i + sstable_file_size]
             self.index_counter += 1
             write_result = self._write_to_sstable_file(self.index_counter, chunk)
             self.sparse_indexes[self.index_counter] = write_result[0]
@@ -101,10 +103,10 @@ class KVStore:
 
         while True:
             self._compact_level(level)
-            next_entries = sum([entry for entry in self.manifest.entries if entry["level"] == level + 1])
+            next_count = sum(1 for entry in self.manifest.entries if entry["level"] == level + 1)
             level_limit = config.MAX_L0_FILES * (10 ** (level + 1))
 
-            if next_entries < level_limit: 
+            if next_count < level_limit: 
                 break
             
             level += 1
