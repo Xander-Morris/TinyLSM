@@ -151,7 +151,7 @@ class KVStore:
         high = len(self.sparse_indexes[index]) - 1
         found = False
 
-        while low < high:
+        while low <= high:
             mid = (low + high) // 2
 
             if self.sparse_indexes[index][mid][0] <= key: 
