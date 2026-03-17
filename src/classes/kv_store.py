@@ -138,13 +138,13 @@ class KVStore:
         while low < high:
             mid = (low + high) // 2
 
-            if self.sparse_indexes[index][mid] <= key: 
-                low = mid 
+            if self.sparse_indexes[index][mid][0] <= key: 
+                low = mid + 1 
                 found = True
             else:
                 high = mid - 1
         
-        offset = self.sparse_indexes[low][1] if found else 0
+        offset = self.sparse_indexes[index][low - 1][1] if found else 0
 
         with open(f"sst_{index}", 'r') as file: 
             file.seek(offset)
@@ -155,7 +155,7 @@ class KVStore:
                 
                 if key == inner_key:
                     return value 
-                elif key > inner_key:
+                elif key < inner_key:
                     break 
 
         return None 
