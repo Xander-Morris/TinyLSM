@@ -75,6 +75,16 @@ class KVStore:
         
         merged = sorted(merged.items())
 
+        for entry in entries + next_entries: 
+            # Remove all files used by the index 
+            index = int(entry["file_name"].split("_")[1])
+            os.remove(f"sst_{index}")
+            os.remove(f"sst_{index}.bloom")
+            os.remove(f"sst_{index}.index")
+            self.manifest.remove(entry["file_name"])
+            self.bloom_filters[index] = None 
+            self.sparse_indexes[index] = None 
+
     def _compact(self):
         sorted_dict = {}
 
