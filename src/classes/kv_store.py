@@ -88,31 +88,20 @@ class KVStore:
             del self.bloom_filters[index] 
             del self.sparse_indexes[index] 
 
+        for i in range(0, len(merged), config.SSTABLE_FILE_SIZE):
+            chunk = merged[i:i + config.SSTABLE_FILE_SIZE]
+            self.index_counter += 1
+            write_result = self._write_to_sstable_file(self.index_counter, chunk)
+            self.sparse_indexes[self.index_counter] = write_result[0]
+            self._write_bloom_filter(chunk, self.index_counter)
+            self._update_manifest(level + 1, f"sst_{self.index_counter}", chunk[0][0], chunk[-1][0])
+
     def _compact(self):
-        sorted_dict = {}
+        self._compact_level(0)
+        l1_entries = sum([entry for entry in self.manifest.entries if entry["level"] == 1])
 
-        for index in range(1, self.index_counter + 1):
-            to_add = self._build_sstable_tuples(index)
-            
-            for key, value in to_add:
-                sorted_dict[key] = value 
-        
-        sorted_dict = sorted(sorted_dict.items())
-
-        for index in range(1, self.index_counter + 1):
-            # Remove all files used by the index 
-            os.remove(f"sst_{index}")
-            os.remove(f"sst_{index}.bloom")
-            os.remove(f"sst_{index}.index")
-        
-        self.bloom_filters = {}
-        self.sparse_indexes = {}
-        self.index_counter = 1
-        write_result = self._write_to_sstable_file(self.index_counter, sorted_dict)
-        self.sparse_indexes[1] = write_result[0] 
-        self.manifest.clear() 
-        self._update_manifest(1, f"sst_{self.index_counter}", write_result[1], write_result[2])
-        self._write_bloom_filter(sorted_dict, 1)
+        if l1_entries > config.MAX_L1_FILES:
+            self._compact_level(1)
 
     def _flush(self):
         self.index_counter += 1
