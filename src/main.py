@@ -18,7 +18,10 @@ def process_line(store, line, replay=False):
         if len(sp) < 3:
             print("3 arguments are required for SCAN!")
         else:
-            store.scan(sp[1], sp[2])
+            tuples = store.scan(sp[1], sp[2])
+
+            for key, value in tuples.items(): 
+                print(f"Key: {key}, value: {value}")
     elif operation == "DELETE":
         if len(sp) < 2:
             print("2 arguments are required for DELETE!")
