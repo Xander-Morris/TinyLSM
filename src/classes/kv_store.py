@@ -51,6 +51,31 @@ class KVStore:
         self.bloom_filters[1] = filter 
         self.index_counter = 1 
 
+    def _flush(self):
+        self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
+        sorted_store = sorted(self._store.items())
+        self._write_to_sstable_file(self.index_counter, sorted_store)
+        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
+
+        for key, value in self._store.items(): 
+            if value == config.TOMBSTONE_VALUE:
+                continue
+
+            filter.add(key)
+
+        with open(f"sst_{self.index_counter}.bloom", 'w') as file:
+            file.write(filter.serialize())
+
+        self.bloom_filters[self.index_counter] = filter 
+        self._store = {}
+        self.entries = 0 
+
+        with open(config.LOG_FILE_NAME, 'w') as file:
+            file.write("")
+
+        if self.index_counter >= config.MAX_SSTABLES:
+            self._compact()
+
     def _binary_search(self, tuples, key):
         low = 0
         high = len(tuples) - 1
@@ -96,7 +121,7 @@ class KVStore:
         return None 
 
     def _load_sstables(self):
-        sst_file_names = glob.glob("sst_*") 
+        sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
         sorted_file_names = sorted(sst_file_names, key=lambda f: int(f.split("_")[1])) # gets the index counter, like in sst_3, we get 3 and sort by that index with respect to the other files
         index_counter = 0
 
@@ -118,31 +143,6 @@ class KVStore:
 
         self.index_counter = index_counter
         self.entries = sum(1 for v in self._store.values() if v is not config.TOMBSTONE_VALUE and v is not None)
-
-    def _flush(self):
-        self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
-        sorted_store = sorted(self._store.items())
-        self._write_to_sstable_file(self.index_counter, sorted_store)
-        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
-
-        for key, value in self._store.items(): 
-            if value == config.TOMBSTONE_VALUE:
-                continue
-
-            filter.add(key)
-
-        with open(f"sst_{self.index_counter}.bloom", 'w') as file:
-            file.write(filter.serialize())
-
-        self.bloom_filters[self.index_counter] = filter 
-        self._store = {}
-        self.entries = 0 
-
-        with open(config.LOG_FILE_NAME, 'w') as file:
-            file.write("")
-
-        if self.index_counter >= config.MAX_SSTABLES:
-            self._compact()
 
     def _set(self, key: str, value: str, sstable_loading=False):
         prev_value = self._store.get(key)
