@@ -186,11 +186,26 @@ class KVStore:
         entries = {}
 
         for key, value in self._store.items():
+            if key == config.TOMBSTONE_VALUE:
+                continue
+
             if key >= start and key <= end:
                 entries[key] = value 
 
         for i in range(1, self.index_counter + 1):
             tuples = self._build_sstable_tuples(i)
+
             for key, value in tuples:
+                if key == config.TOMBSTONE_VALUE:
+                    continue
+
                 if key >= start and key <= end:
                     entries[key] = value 
+
+        entries = sorted(entries)
+        res = []
+
+        for key, value in entries.items():
+            res.append((key, value))
+
+        return res
