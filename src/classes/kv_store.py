@@ -20,6 +20,20 @@ class KVStore:
 
                 file.write(f"{key} {value}\n")
 
+    def _write_bloom_filter(self, items, index):
+        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
+
+        for key, value in items:
+            if value == config.TOMBSTONE_VALUE:
+                continue 
+
+            filter.add(key)
+
+        with open(f"sst_{index}.bloom", 'w') as file:
+            file.write(filter.serialize())
+
+        self.bloom_filters[index] = filter 
+
     def _compact(self):
         sorted_dict = {}
 
@@ -37,36 +51,14 @@ class KVStore:
         
         self._write_to_sstable_file(1, sorted_dict) 
         self.bloom_filters = {}
-        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
-
-        for key, value in sorted_dict:
-            if value == config.TOMBSTONE_VALUE:
-                continue 
-
-            filter.add(key)
-        
-        with open("sst_1.bloom", 'w') as file: 
-            file.write(filter.serialize())
-
-        self.bloom_filters[1] = filter 
-        self.index_counter = 1 
+        self._write_bloom_filter(sorted_dict, 1)
+        self.index_counter = 1
 
     def _flush(self):
-        self.index_counter += 1 # always start with incrementing by 1 to not overwrite an existing file
+        self.index_counter += 1
         sorted_store = sorted(self._store.items())
         self._write_to_sstable_file(self.index_counter, sorted_store)
-        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
-
-        for key, value in self._store.items(): 
-            if value == config.TOMBSTONE_VALUE:
-                continue
-
-            filter.add(key)
-
-        with open(f"sst_{self.index_counter}.bloom", 'w') as file:
-            file.write(filter.serialize())
-
-        self.bloom_filters[self.index_counter] = filter 
+        self._write_bloom_filter(self._store.items(), self.index_counter)
         self._store = {}
         self.entries = 0 
 
