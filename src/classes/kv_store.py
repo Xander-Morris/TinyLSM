@@ -131,7 +131,10 @@ class KVStore:
         return tuples
 
     def _search_sstables(self, key):
-        sorted_entries = sorted(self.manifest.entries, key=lambda entry: (0, -index) if entry["level"] == 0 else (entry["level"], 0))
+        sorted_entries = sorted(self.manifest.entries, 
+                                key=lambda entry: 
+                                (0, -int(entry["file_name"].split("_")[1])) if entry["level"] == 0 
+                                else (entry["level"], 0))
 
         for entry in sorted_entries:
             if entry["level"] > 0 and (key > entry["max_key"] or key < entry["min_key"]):
