@@ -1,6 +1,6 @@
 # TinyLSM
 
-This is a project I've worked on while reading Designing Data-Intensive Applications to help me understand the concepts in the book better. This is a LSM-tree (Log-Structured Merge-tree) engine written in Python that uses SSTables, bloom filters, leveled compaction, sparse indexing, and more. Writes are buffered in memory, while data integrity is preserved via the write-ahead log. Data is flushed to sorted files on disk (SSTables), which are organized into levels and merged through a compaction process to remove obsolete data and optimize read performance.
+This is a project I've worked on while reading Designing Data-Intensive Applications to help me understand the concepts in the book better. This is an LSM-tree (Log-Structured Merge-tree) engine written in Python that uses SSTables, Bloom filters, level compaction, sparse indexing, and more. Writes are buffered in memory, while data integrity is preserved via the write-ahead log. Data is flushed to sorted files on disk (SSTables), which are organized into levels and merged through a compaction process to remove obsolete data and optimize read performance.
 
 ## How to Run
 
