@@ -17,6 +17,7 @@ class KVStore:
     # Private Methods
     def _write_to_sstable_file(self, index, sorted_store):
         sparse = []
+        min_key, max_key = None, None 
 
         with open(f"sst_{index}", 'w') as file: 
             i = 0
@@ -25,6 +26,9 @@ class KVStore:
                 if value == config.TOMBSTONE_VALUE: 
                     continue 
 
+                if not min_key: 
+                    min_key = key  
+                max_key = key 
                 i += 1
                 offset = file.tell()
                 file.write(f"{key} {value}\n")
@@ -36,7 +40,7 @@ class KVStore:
             for key, offset in sparse: 
                 file.write(f"{key} {offset}\n")
 
-        return sparse 
+        return (sparse, min_key, max_key) 
 
     def _write_bloom_filter(self, items, index):
         filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
@@ -72,14 +76,15 @@ class KVStore:
         self.bloom_filters = {}
         self.sparse_indexes = {}
         self.index_counter = 1
-        self.sparse_indexes[1] = self._write_to_sstable_file(1, sorted_dict) 
+        self.sparse_indexes[1] = self._write_to_sstable_file(1, sorted_dict)[0] 
         self._write_bloom_filter(sorted_dict, 1)
 
     def _flush(self):
         self.index_counter += 1
         sorted_store = sorted(self._store.items())
-        self.sparse_indexes[self.index_counter] = self._write_to_sstable_file(self.index_counter, sorted_store)
-        self.manifest.add(0, f"sst_{self.index_counter}", sorted_store[0][0], sorted_store[len(sorted_store) - 1][0])
+        write_result = self._write_to_sstable_file(self.index_counter, sorted_store)
+        self.sparse_indexes[self.index_counter] = write_result[0]
+        self.manifest.add(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
         self.manifest.save()
         self._write_bloom_filter(self._store.items(), self.index_counter)
         self._store = {}
