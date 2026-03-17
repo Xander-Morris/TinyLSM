@@ -2,6 +2,7 @@ import glob
 import os 
 import config 
 import classes.bloom_filter as bloom_filter 
+import classes.manifest as manifest 
 
 class KVStore:
     def __init__(self):
@@ -10,6 +11,7 @@ class KVStore:
         self.index_counter = 0
         self.bloom_filters = {}
         self.sparse_indexes = {}
+        self.manifest = manifest.Manifest.load() 
         self._load_sstables()
 
     # Private Methods
@@ -77,6 +79,8 @@ class KVStore:
         self.index_counter += 1
         sorted_store = sorted(self._store.items())
         self.sparse_indexes[self.index_counter] = self._write_to_sstable_file(self.index_counter, sorted_store)
+        self.manifest.add(0, f"sst_{self.index_counter}", sorted_store[0][0], sorted_store[len(sorted_store) - 1][0])
+        self.manifest.save()
         self._write_bloom_filter(self._store.items(), self.index_counter)
         self._store = {}
         self.entries = 0 
