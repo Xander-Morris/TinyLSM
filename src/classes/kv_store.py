@@ -62,6 +62,10 @@ class KVStore:
 
     def _compact_level(self, level):
         entries = [entry for entry in self.manifest.entries if entry["level"] == level]
+
+        if not entries:
+            return
+
         overall_min = min(entry["min_key"] for entry in entries)
         overall_max = max(entry["max_key"] for entry in entries)
         next_entries = [entry for entry in self.manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
