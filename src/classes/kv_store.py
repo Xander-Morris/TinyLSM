@@ -131,7 +131,34 @@ class KVStore:
             print(f"No sparse index exists in the sparse_indexes dictionary for {index}!")
             return
 
+        low = 0
+        high = len(self.sparse_indexes[index])
+        found = False
+
+        while low < high:
+            mid = (low + high) // 2
+
+            if self.sparse_indexes[index][mid] <= key: 
+                low = mid 
+                found = True
+            else:
+                high = mid - 1
         
+        offset = self.sparse_indexes[low][1] if found else 0
+
+        with open(f"sst_{index}", 'r') as file: 
+            file.seek(offset)
+
+            for line in file: 
+                line = line.strip() 
+                inner_key, value = line.split(" ")
+                
+                if key == inner_key:
+                    return value 
+                elif key > inner_key:
+                    break 
+
+        return None 
 
     def _load_sstables(self):
         sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
