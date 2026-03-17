@@ -131,10 +131,15 @@ class KVStore:
         return tuples
 
     def _search_sstables(self, key):
-        for index in range(self.index_counter, 0, -1):
-            if not self.bloom_filters[index].contains(key):
+        for entry in self.manifest.entries:
+            if entry["level"] > 0 and key > entry["max_key"] or key < entry["min_key"]:
                 continue 
 
+            index = int(entry["file_name"].split("_")[1])
+
+            if not self.bloom_filters[index].contains(key):
+                continue 
+                
             if self.sparse_indexes[index]: 
                 sparse_index_result = self._search_sstable_with_index(index, key)
 
