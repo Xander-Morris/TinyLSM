@@ -118,6 +118,9 @@ class KVStore:
             if self.sparse_indexes[index]: 
                 sparse_index_result = self._search_sstable_with_index(index, key)
 
+                if sparse_index_result == config.TOMBSTONE_VALUE or sparse_index_result == None:
+                    return None 
+
                 if sparse_index_result is not None: 
                     return sparse_index_result 
 
