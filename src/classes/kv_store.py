@@ -85,8 +85,8 @@ class KVStore:
             os.remove(f"sst_{index}.bloom")
             os.remove(f"sst_{index}.index")
             self.manifest.remove(entry["file_name"])
-            del self.bloom_filters[index] 
-            del self.sparse_indexes[index] 
+            self.bloom_filters.pop(index, None)
+            self.sparse_indexes.pop(index, None)
 
         sstable_file_size = config.MAX_L0_FILES * (10 ** level)
 
