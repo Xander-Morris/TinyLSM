@@ -13,15 +13,26 @@ class KVStore:
 
     # Private Methods
     def _write_to_sstable_file(self, index, sorted_store):
+        sparse = []
 
-        
         with open(f"sst_{index}", 'w') as file: 
+            i = 0
+
             for key, value in sorted_store:
+                i += 1
+
                 if value == config.TOMBSTONE_VALUE: 
                     continue 
 
                 offset = file.tell()
                 file.write(f"{key} {value}\n")
+                
+                if i % config.SPARSE_INDEX_N == 0:
+                    sparse.append((key, offset))
+
+        with open(f"sst_{index}.index", 'w') as file: 
+            for key, offset in sparse: 
+                file.write(f"{key} {offset}")
 
     def _write_bloom_filter(self, items, index):
         filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
