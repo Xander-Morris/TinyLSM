@@ -189,7 +189,7 @@ class KVStore:
         entries = {}
 
         for key, value in self._store.items():
-            if key == config.TOMBSTONE_VALUE:
+            if value == config.TOMBSTONE_VALUE:
                 continue
 
             if key >= start and key <= end:
@@ -199,7 +199,7 @@ class KVStore:
             tuples = self._build_sstable_tuples(i)
 
             for key, value in tuples:
-                if key == config.TOMBSTONE_VALUE:
+                if value == config.TOMBSTONE_VALUE:
                     continue
 
                 if key >= start and key <= end:
