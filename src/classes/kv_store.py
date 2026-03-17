@@ -60,13 +60,16 @@ class KVStore:
         sorted_dict = sorted(sorted_dict.items())
 
         for index in range(1, self.index_counter + 1):
+            # Remove all files used by the index 
             os.remove(f"sst_{index}")
             os.remove(f"sst_{index}.bloom")
+            os.remove(f"sst_{index}.index")
         
-        self._write_to_sstable_file(1, sorted_dict) 
         self.bloom_filters = {}
-        self._write_bloom_filter(sorted_dict, 1)
+        self.sparse_indexes = {}
         self.index_counter = 1
+        self._write_to_sstable_file(1, sorted_dict) 
+        self._write_bloom_filter(sorted_dict, 1)
 
     def _flush(self):
         self.index_counter += 1
