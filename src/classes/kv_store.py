@@ -132,7 +132,7 @@ class KVStore:
 
     def _search_sstables(self, key):
         for entry in self.manifest.entries:
-            if entry["level"] > 0 and key > entry["max_key"] or key < entry["min_key"]:
+            if entry["level"] > 0 and (key > entry["max_key"] or key < entry["min_key"]):
                 continue 
 
             index = int(entry["file_name"].split("_")[1])
