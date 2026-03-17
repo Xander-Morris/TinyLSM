@@ -205,10 +205,10 @@ class KVStore:
                 if key >= start and key <= end:
                     entries[key] = value 
 
-        entries = sorted(entries)
+        sorted_keys = sorted(entries)
         res = []
 
-        for key, value in entries:
-            res.append((key, value))
+        for key in sorted_keys:
+            res.append((key, entries[key]))
 
         return res
