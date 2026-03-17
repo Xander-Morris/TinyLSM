@@ -317,8 +317,9 @@ class KVStore:
             if key >= start and key <= end:
                 entries[key] = value 
 
-        for i in range(1, self.index_counter + 1):
-            tuples = self._build_sstable_tuples(i)
+        for entry in self.manifest.entries:
+            index = int(entry["file_name"].split("_")[1])
+            tuples = self._build_sstable_tuples(index)
 
             for key, value in tuples:
                 if value == config.TOMBSTONE_VALUE:
