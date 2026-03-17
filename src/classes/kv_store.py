@@ -9,6 +9,7 @@ class KVStore:
         self.entries = 0
         self.index_counter = 0
         self.bloom_filters = {}
+        self.sparse_indexes = {}
         self._load_sstables()
 
     # Private Methods
@@ -19,11 +20,10 @@ class KVStore:
             i = 0
 
             for key, value in sorted_store:
-                i += 1
-
                 if value == config.TOMBSTONE_VALUE: 
                     continue 
 
+                i += 1
                 offset = file.tell()
                 file.write(f"{key} {value}\n")
                 
@@ -32,7 +32,7 @@ class KVStore:
 
         with open(f"sst_{index}.index", 'w') as file: 
             for key, offset in sparse: 
-                file.write(f"{key} {offset}")
+                file.write(f"{key} {offset}\n")
 
     def _write_bloom_filter(self, items, index):
         filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
@@ -146,6 +146,20 @@ class KVStore:
                     self.bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(line)
             except FileNotFoundError:
                 print(f"Bloom filter file does not exist for index {index_counter}!")
+
+            try:
+                tuples = []
+
+                with open(f"sst_{index_counter}.index", 'r') as file: 
+                    for line in file: 
+                        line = line.strip() 
+                        key, offset = line.split(" ")
+                        offset = int(offset)
+                        tuples.append((key, offset))
+                
+                self.sparse_indexes[index_counter] = tuples 
+            except FileNotFoundError:
+                print(f"Index file does not exist for index {index_counter}!")
 
         self.index_counter = index_counter
         self.entries = sum(1 for v in self._store.values() if v is not config.TOMBSTONE_VALUE and v is not None)
