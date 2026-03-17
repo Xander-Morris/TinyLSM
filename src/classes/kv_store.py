@@ -115,6 +115,12 @@ class KVStore:
             if not self.bloom_filters[index].contains(key):
                 continue 
 
+            if self.sparse_indexes[index]: 
+                sparse_index_result = self._search_sstable_with_index(index, key)
+
+                if sparse_index_result is not None: 
+                    return sparse_index_result 
+
             tuples = self._build_sstable_tuples(index)
             search_result = self._binary_search(tuples, key)
 
