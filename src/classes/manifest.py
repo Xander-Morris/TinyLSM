@@ -22,7 +22,7 @@ class Manifest:
         self.entries.append({"level": level, "file_name": file_name, "min_key": min_key, "max_key": max_key})
 
     def remove(self, file_name):
-        self.entries.remove(entry for entry in self.entries if entry["file_name"] == file_name)
+        self.entries = [entry for entry in self.entries if entry["file_name"] != file_name]
     
     def save(self):
         with open("manifest.json", 'w') as file: 
