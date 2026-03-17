@@ -34,6 +34,8 @@ class KVStore:
             for key, offset in sparse: 
                 file.write(f"{key} {offset}\n")
 
+        return sparse 
+
     def _write_bloom_filter(self, items, index):
         filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
 
@@ -68,13 +70,13 @@ class KVStore:
         self.bloom_filters = {}
         self.sparse_indexes = {}
         self.index_counter = 1
-        self._write_to_sstable_file(1, sorted_dict) 
+        self.sparse_indexes[1] = self._write_to_sstable_file(1, sorted_dict) 
         self._write_bloom_filter(sorted_dict, 1)
 
     def _flush(self):
         self.index_counter += 1
         sorted_store = sorted(self._store.items())
-        self._write_to_sstable_file(self.index_counter, sorted_store)
+        self.sparse_indexes[self.index_counter] = self._write_to_sstable_file(self.index_counter, sorted_store)
         self._write_bloom_filter(self._store.items(), self.index_counter)
         self._store = {}
         self.entries = 0 
