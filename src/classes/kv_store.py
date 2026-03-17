@@ -1,7 +1,7 @@
 import glob
 import os 
 import config 
-import bloom_filter
+import classes.bloom_filter as bloom_filter 
 
 class KVStore:
     def __init__(self):
@@ -109,9 +109,12 @@ class KVStore:
                     key, value = line.split(" ")
                     self._set(key, value, True)
             
-            with open(f"sst_{index_counter}.bloom", 'r') as file: 
-                line = file.read() 
-                self.bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(line)
+            try:
+                with open(f"sst_{index_counter}.bloom", 'r') as file: 
+                    line = file.read() 
+                    self.bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(line)
+            except FileNotFoundError:
+                print(f"Bloom filter file does not exist for index {index_counter}!")
 
         self.index_counter = index_counter
         self.entries = sum(1 for v in self._store.values() if v is not config.TOMBSTONE_VALUE and v is not None)
@@ -205,7 +208,7 @@ class KVStore:
         entries = sorted(entries)
         res = []
 
-        for key, value in entries.items():
+        for key, value in entries:
             res.append((key, value))
 
         return res

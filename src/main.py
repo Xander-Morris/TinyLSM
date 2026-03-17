@@ -20,7 +20,7 @@ def process_line(store, line, replay=False):
         else:
             tuples = store.scan(sp[1], sp[2])
 
-            for key, value in tuples.items(): 
+            for key, value in tuples: 
                 print(f"Key: {key}, value: {value}")
     elif operation == "DELETE":
         if len(sp) < 2:
