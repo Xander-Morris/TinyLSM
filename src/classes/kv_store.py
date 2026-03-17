@@ -92,7 +92,7 @@ class KVStore:
             self.bloom_filters.pop(index, None)
             self.sparse_indexes.pop(index, None)
 
-        sstable_file_size = config.MAX_L0_FILES * (10 ** level)
+        sstable_file_size = config.MAX_L0_FILES * (10 ** (level + 1))
 
         for i in range(0, len(merged), sstable_file_size):
             chunk = merged[i:i + sstable_file_size]
