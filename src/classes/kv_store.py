@@ -181,3 +181,10 @@ class KVStore:
         with open(config.LOG_FILE_NAME, 'a') as file:
             file.write(f"DELETE {key}\n")
         self._delete(key)
+
+    def scan(self, start: str, end: str):
+        entries = {}
+
+        for key, value in self._store.items():
+            if key >= start and key <= end:
+                entries[key] = value 

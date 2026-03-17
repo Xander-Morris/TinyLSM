@@ -14,6 +14,11 @@ def process_line(store, line, replay=False):
                 store._set(sp[1], sp[2], True)
             else:
                 store.set(sp[1], sp[2])
+    elif operation == "SCAN":
+        if len(sp) < 3:
+            print("3 arguments are required for SCAN!")
+        else:
+            store.scan(sp[1], sp[2])
     elif operation == "DELETE":
         if len(sp) < 2:
             print("2 arguments are required for DELETE!")
