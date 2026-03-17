@@ -82,7 +82,8 @@ class KVStore:
         self.index_counter = 1
         write_result = self._write_to_sstable_file(self.index_counter, sorted_dict)
         self.sparse_indexes[1] = write_result[0] 
-        self._update_manifest(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
+        self.manifest.clear() 
+        self._update_manifest(1, f"sst_{self.index_counter}", write_result[1], write_result[2])
         self._write_bloom_filter(sorted_dict, 1)
 
     def _flush(self):

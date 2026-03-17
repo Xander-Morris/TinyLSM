@@ -27,3 +27,6 @@ class Manifest:
     def save(self):
         with open("manifest.json", 'w') as file: 
             json.dump(self.entries, file)
+
+    def clear(self):
+        self.entries = []
