@@ -65,7 +65,15 @@ class KVStore:
         overall_max = max(entry["max_key"] for entry in entries)
         entries = [entry for entry in self.manifest.entries if entry["level"] == level]
         next_entries = [entry for entry in self.manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
+        merged = {}
+
+        for entry in next_entries: 
+            merged.append(entry)
         
+        for entry in entries: 
+            merged.append(entry)
+        
+        merged = sorted(merged.items())
 
     def _compact(self):
         sorted_dict = {}
