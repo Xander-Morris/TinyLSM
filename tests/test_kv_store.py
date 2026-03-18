@@ -8,8 +8,8 @@ def force_flush(store):
         store.set(f"foo_{i}", "bar_test")
 
 def force_compaction(store):
-    for i in range(config.MAX_ENTRIES * 10):
-        store.set(f"foo_{i}", "bar_test")
+    for i in range(config.MAX_ENTRIES * config.MAX_L0_FILES + 1):
+        store.set(f"compact_{i}", "bar_test")
 
 def do_setting(store, setting):
     for key, value in setting.items():
