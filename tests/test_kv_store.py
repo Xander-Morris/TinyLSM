@@ -68,3 +68,15 @@ def test_compaction(tmp_path):
 
     for key, value in setting.items():
         assert store.get(key) == value
+
+def test_scan(tmp_path):
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore()
+    setting = {"foo": "bar", "xander": "sadie"}
+    do_setting(store, setting)
+    result = store.scan("foo", "xander")
+    assert result == [("foo", "bar"), ("xander", "sadie")]
+    setting = {"apple": "banana", "foo": "bar", "xander": "sadie", "zilophone": "wala"}
+    do_setting(store, setting)
+    result = store.scan("foo", "xander")
+    assert result == [("foo", "bar"), ("xander", "sadie")]
