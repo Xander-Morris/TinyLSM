@@ -30,7 +30,7 @@ class KVStore:
     # Private Methods
     def _write_sstable(self, index, data):
         write_result = self._write_to_sstable_file(index, data)
-        self.sparse_indexes[self.index_counter] = write_result[0]
+        self.sparse_indexes[index] = write_result[0]
         self._write_bloom_filter(data, self.index_counter)
 
     def _write_to_sstable_file(self, index, sorted_store):
