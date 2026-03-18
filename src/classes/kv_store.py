@@ -25,7 +25,7 @@ class KVStore:
                 for line in file: 
                     utils.process_line(self, line, True)
         except FileNotFoundError:
-            print("No file exists!")
+            pass
 
     # Private Methods
     def _write_sstable(self, index, data):
@@ -87,7 +87,7 @@ class KVStore:
 
         def read_from_entries_list(entries_list):
             for entry in entries_list:
-                index = int(entry["file_name"].split("_")[1])
+                index = KVStore._sst_index(entry)
 
                 for key, value in self._build_sstable_tuples(index):
                     merged[key] = value
@@ -174,7 +174,7 @@ class KVStore:
     def _search_sstables(self, key):
         sorted_entries = sorted(self.manifest.entries, 
                                 key=lambda entry: 
-                                (0, -(KVStore._sst_index(entry)) if entry["level"] == 0 
+                                (0, -KVStore._sst_index(entry) if entry["level"] == 0 
                                 else (entry["level"], 0)))
 
         for entry in sorted_entries:
@@ -342,10 +342,4 @@ class KVStore:
                 if key >= start and key <= end:
                     entries[key] = value 
 
-        sorted_keys = sorted(entries)
-        res = []
-
-        for key in sorted_keys:
-            res.append((key, entries[key]))
-
-        return res
+        return [(key, entries[key]) for key in sorted(entries)]
