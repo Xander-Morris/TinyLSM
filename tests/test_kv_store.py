@@ -100,7 +100,7 @@ def test_scan_across_flush_boundary(store):
     force_flush(store, True)
     setting2 = {"apple": "banana", "foo": "bar", "xander": "sadie", "zilophone": "wala"}
     do_setting(store, setting2)
-    assert_all_readable(setting1)
-    assert_all_readable(setting2)
+    assert_all_readable(store, setting1)
+    assert_all_readable(store, setting2)
     result = store.scan("apple", "zilophone")
     assert result == [("apple", "banana"), ("foo", "bar"), ("xander", "sadie"), ("zilophone", "wala")]
