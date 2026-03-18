@@ -167,10 +167,11 @@ class KVStore:
 
         return None
     
-    def _build_sstable_tuples(self, index):
+    def _build_sstable_tuples(self, index, index_file=False):
         tuples = []
+        file_name = f"sst_{index}.index" if index_file else f"sst_{index}"
 
-        with open(f"sst_{index}", 'r') as file:
+        with open(file_name, 'r') as file:
             for line in file: 
                 line = line.strip() 
                 inner_key, value = line.split(" ")
@@ -271,7 +272,7 @@ class KVStore:
                 print(f"Bloom filter file does not exist for index {index_counter}!")
 
             try:
-                tuples = self._build_sstable_tuples(index_counter)
+                tuples = self._build_sstable_tuples(index_counter, True)
                 self.sparse_indexes[index_counter] = tuples 
             except FileNotFoundError:
                 print(f"Index file does not exist for index {index_counter}!")
