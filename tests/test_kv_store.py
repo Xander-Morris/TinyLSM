@@ -98,3 +98,5 @@ def test_restart_after_compaction(tmp_path):
 
     for key, value in setting.items():
         assert store.get(key) == value
+
+def test_
