@@ -1,7 +1,6 @@
 import glob
 import os 
 import src.config as config 
-import src.utils as utils 
 import src.classes.bloom_filter as bloom_filter 
 import src.classes.manifest as manifest 
 
@@ -23,11 +22,19 @@ class KVStore:
         try:
             with open(config.LOG_FILE_NAME, 'r') as file:
                 for line in file: 
-                    utils.process_line(self, line, True)
+                    self._replay_line(line)
         except FileNotFoundError:
             pass
 
     # Private Methods
+    def _replay_line(self, line):
+        line = line.strip()
+        sp = line.split(" ")
+        if sp[0] == "SET":
+            self._store[sp[1]] = sp[2]
+        elif sp[0] == "DELETE":
+            self._store[sp[1]] = config.TOMBSTONE_VALUE
+
     def _write_sstable(self, index, data):
         write_result = self._write_to_sstable_file(index, data)
         self.sparse_indexes[index] = write_result[0]
@@ -254,7 +261,7 @@ class KVStore:
                 for line in file: 
                     line = line.strip() 
                     key, value = line.split(" ")
-                    self._set(key, value, True)
+                    self._store[key] = value 
             
             try:
                 with open(f"sst_{index_counter}.bloom", 'r') as file: 
@@ -280,24 +287,24 @@ class KVStore:
         self.index_counter = index_counter
         self.entries = sum(1 for v in self._store.values() if v is not config.TOMBSTONE_VALUE and v is not None)
 
-    def _set(self, key: str, value: str, sstable_loading=False):
+    def _set(self, key: str, value: str):
         prev_value = self._store.get(key)
         self._store[key] = value 
 
-        if value is not None and prev_value is None and not sstable_loading:
+        if value is not None and prev_value is None:
             self.entries += 1
         
-        if self.entries < config.MAX_ENTRIES or sstable_loading:
+        if self.entries < config.MAX_ENTRIES:
             return 
 
         # Do the flush 
         self._flush()
 
-    def _delete(self, key: str, sstable_loading=False):
+    def _delete(self, key: str):
         prev_value = self._store.get(key)
         self._store[key] = config.TOMBSTONE_VALUE
 
-        if prev_value is not None and not sstable_loading:
+        if prev_value is not None:
             self.entries -= 1
 
     # Public Methods 
