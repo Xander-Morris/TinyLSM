@@ -60,4 +60,11 @@ def test_sstable_read_after_flush(tmp_path):
         assert store.get(key) == value
 
 def test_compaction(tmp_path):
-    
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore()
+    setting = {"foo": "bar", "xander": "sadie"}
+    do_setting(store, setting)
+    force_compaction(store)
+
+    for key, value in setting.items():
+        assert store.get(key) == value
