@@ -80,3 +80,10 @@ def test_scan(tmp_path):
     do_setting(store, setting)
     result = store.scan("foo", "xander")
     assert result == [("foo", "bar"), ("xander", "sadie")]
+
+def test_bloom_filter_false_negative(tmp_path):
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore()
+    store.set("xander", "sadie")
+    force_flush(store)
+    assert store.get("xander") == "sadie" 
