@@ -1,8 +1,8 @@
 import glob
 import os 
-import config 
-import classes.bloom_filter as bloom_filter 
-import classes.manifest as manifest 
+import src.config as config 
+import src.classes.bloom_filter as bloom_filter 
+import src.classes.manifest as manifest 
 
 class KVStore:
     def __init__(self):
