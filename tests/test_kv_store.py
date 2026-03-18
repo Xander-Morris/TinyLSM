@@ -103,5 +103,11 @@ def test_overwrite_key(tmp_path):
     os.chdir(tmp_path)
     store = src.classes.kv_store.KVStore()
     store.set("foo", "bar")
+    """
+        I flush between the two "set" operations here so the first value is on the disk when the second comes in,
+        then assert the overwrite still wins across the SSTable boundary. 
+        This tests the more interesting case where the old value is in an SSTable, and the new one is in the memtable.
+    """
+    force_flush(store) 
     store.set("foo", "baz")
     assert store.get("foo") == "baz"
