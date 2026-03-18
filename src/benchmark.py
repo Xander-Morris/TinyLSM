@@ -38,9 +38,12 @@ def setup():
 
 def main():
     store = setup() 
-    print(benchmark_writes(store, config.BENCHMARK_N))
-    print(benchmark_reads(store, config.BENCHMARK_N))
-    print(benchmark_misses(store, config.BENCHMARK_N))
+    total_write_time = benchmark_writes(store, config.BENCHMARK_N)
+    print(f"Writes: {config.BENCHMARK_N} ops in {total_write_time}s -> {config.BENCHMARK_N / total_write_time}")
+    total_read_time = benchmark_reads(store, config.BENCHMARK_N)
+    print(f"Reads: {config.BENCHMARK_N} ops in {total_read_time}s -> {config.BENCHMARK_N / total_read_time}")
+    total_misses_time = benchmark_misses(store, config.BENCHMARK_N)
+    print(f"Misses: {config.BENCHMARK_N} ops in {total_misses_time}s -> {config.BENCHMARK_N / total_misses_time}")
     shutil.rmtree(os.getcwd())
 
 if __name__ == "__main__": 
