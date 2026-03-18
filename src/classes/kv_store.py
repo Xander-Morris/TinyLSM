@@ -26,6 +26,8 @@ class KVStore:
         except FileNotFoundError:
             pass
 
+        self._wal = open(config.LOG_FILE_NAME, 'a')
+
     # Private Methods
     def _replay_line(self, line):
         line = line.strip()
@@ -141,10 +143,10 @@ class KVStore:
         self._update_manifest(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
         self._store = {}
         self.entries = 0 
-
-        with open(config.LOG_FILE_NAME, 'w') as file:
-            file.write("")
-
+        self._wal.close()
+        self._wal = open(config.LOG_FILE_NAME, 'w')
+        self._wal.close()
+        self._wal = open(config.LOG_FILE_NAME, 'a')
         l0_count = sum(1 for entry in self.manifest.entries if entry["level"] == 0)
         
         if l0_count >= config.MAX_L0_FILES:
@@ -304,8 +306,8 @@ class KVStore:
 
     # Public Methods 
     def set(self, key: str, value: str):
-        with open(config.LOG_FILE_NAME, 'a') as file:
-            file.write(f"SET {key} {value}\n")
+        self._wal.write(f"SET {key} {value}\n")
+        self._wal.flush()
         self._set(key, value)
 
     def get(self, key: str):
@@ -319,8 +321,8 @@ class KVStore:
         return None if raw_value == config.TOMBSTONE_VALUE else raw_value
 
     def delete(self, key: str):
-        with open(config.LOG_FILE_NAME, 'a') as file:
-            file.write(f"DELETE {key}\n")
+        self._wal.write(f"DELETE {key}\n")
+        self._wal.flush()
         self._delete(key)
 
     def scan(self, start: str, end: str):

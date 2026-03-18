@@ -48,6 +48,7 @@ def main():
     total_misses_time = benchmark_misses(store, config.BENCHMARK_N)
     print(f"Misses: {config.BENCHMARK_N} ops in {total_misses_time:.2f}s -> {int(config.BENCHMARK_N / total_misses_time)} ops/sec")
     os.chdir(original_dir)
+    store._wal.close()
     shutil.rmtree(pth)
 
 if __name__ == "__main__": 
