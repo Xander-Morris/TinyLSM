@@ -9,8 +9,8 @@ def benchmark_writes(store, n):
         store.set(f"test_key_{i}", f"test_value_{i}")
 
 def setup():
-    tempfile.mkdtemp()
-    os.chdir() 
+    pth = tempfile.mkdtemp()
+    os.chdir(pth) 
     store = kv_store.KVStore()
 
     return store 
