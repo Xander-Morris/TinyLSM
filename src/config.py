@@ -4,7 +4,7 @@ import dotenv
 dotenv.load_dotenv()
 
 LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "log_file.txt")
-MAX_MEMTABLE_SIZE = int(os.getenv("MAX_MEMTABLE_SIZE", 1048576)) # Default of 1MB
+MAX_MEMTABLE_SIZE = int(os.getenv("MAX_MEMTABLE_SIZE", 4096)) # Default of 4KB
 TOMBSTONE_VALUE = os.getenv("TOMBSTONE_VALUE", "__TOMBSTONE__")
 HASH_FUNCTIONS = int(os.getenv("HASH_FUNCTIONS", 5))
 BLOOM_FILTER_SIZE = int(os.getenv("BLOOM_FILTER_SIZE", 5))

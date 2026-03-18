@@ -26,19 +26,21 @@ EXIT               # quit
 Configuration is done through a `.env` file in the project root:
 
 ```
-LOG_FILE_NAME="log_file.txt"   # WAL file name
-MAX_ENTRIES=5                # memtable size before flush
-MAX_L0_FILES=4               # L0 SSTable count before compaction triggers
-BLOOM_FILTER_SIZE=1000       # number of bits in each bloom filter
-HASH_FUNCTIONS=5             # number of hash functions used by bloom filter
-SPARSE_INDEX_N=4             # sample every Nth key for the sparse index
+LOG_FILE_NAME="log_file.txt"       # WAL file name
+MAX_MEMTABLE_SIZE=4096             # memtable size in bytes before flush (default 4KB)
+MAX_L0_FILES=4                     # L0 SSTable count before compaction triggers
+BLOOM_FILTER_SIZE=1000             # number of bits in each bloom filter
+HASH_FUNCTIONS=5                   # number of hash functions used by bloom filter
+SPARSE_INDEX_N=4                   # sample every Nth key for the sparse index
+WAL_BUFFER_SIZE=100                # number of writes before WAL is flushed to disk
 TOMBSTONE_VALUE="__TOMBSTONE__"
+BENCHMARK_N=10000                  # number of operations to run in the benchmark
 ```
 
 ## Architecture
 
 ### Memtable
-Writes go into an in-memory dictionary first. This keeps writes fast — no disk I/O on the write path. Once the memtable hits `MAX_ENTRIES`, it gets flushed to disk as an SSTable.
+Writes go into an in-memory dictionary first. This keeps writes fast — no disk I/O on the write path. Once the memtable exceeds `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
 
 ### Write-Ahead Log (WAL)
 Every write is appended to a log file before touching memory. If the process crashes, the log is replayed on startup to rebuild the memtable. Once the memtable is flushed, the log is cleared since the data is now persisted in an SSTable.
@@ -60,12 +62,12 @@ Deletes don't immediately remove data — they write a special tombstone marker.
 
 ## Benchmarks
 
-Run with `python -m src.benchmark`. Results on a Windows 11 machine (N=10,000):
+Run with `python -m src.benchmark`. Results on a Windows 11 machine with a 4KB memtable and N=10,000, which triggers real flushes and compactions on every run:
 
 | Operation | Ops/sec |
 |-----------|---------|
-| Writes    | ~820    |
-| Reads     | ~8,800  |
-| Misses    | ~103,000 |
+| Writes    | ~4,900  |
+| Reads     | ~8,200  |
+| Misses    | ~47,500 |
 
-Miss lookups are ~125x faster than reads — bloom filters eliminate file I/O entirely for keys that don't exist.
+Miss lookups are ~10x faster than reads — bloom filters eliminate file I/O entirely for keys that don't exist. The WAL uses a write buffer of 100 entries before flushing to disk, trading a small crash-recovery window for higher write throughput.
