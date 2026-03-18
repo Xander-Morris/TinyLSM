@@ -4,6 +4,11 @@ import time
 import tempfile 
 import shutil 
 
+def benchmark_reads(store, n):
+
+def benchmark_misses(store, n):
+
+
 def benchmark_writes(store, n):
     start = time.perf_counter()
     for i in range(0, n):
@@ -18,3 +23,10 @@ def setup():
     store = kv_store.KVStore()
 
     return store 
+
+def main():
+    store = setup() 
+    print(benchmark_writes(store, 10000))
+
+if __name__ == "__main__": 
+    main() 
