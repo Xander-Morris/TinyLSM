@@ -41,6 +41,7 @@ def main():
     print(benchmark_writes(store, config.BENCHMARK_N))
     print(benchmark_reads(store, config.BENCHMARK_N))
     print(benchmark_misses(store, config.BENCHMARK_N))
+    shutil.rmtree(os.getcwd())
 
 if __name__ == "__main__": 
     main() 
