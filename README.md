@@ -43,7 +43,7 @@ BENCHMARK_N=10000                  # number of operations to run in the benchmar
 Writes go into an in-memory dictionary first. This keeps writes fast — no disk I/O on the write path. Once the memtable exceeds `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
 
 ### Write-Ahead Log (WAL)
-Every write is recorded in a WAL before touching the memtable. Writes are buffered and flushed to disk every WAL_BUFFER_SIZE operations for throughput, while a full flush is always forced before the memtable is persisted to an SSTable. On startup, the log is replayed to rebuild any unflushed memtable state.
+Every write is appended to the WAL and the memtable in sequence. WAL writes are buffered and flushed to disk every WAL_BUFFER_SIZE operations for throughput, with a full flush forced before any memtable is persisted to an SSTable. On startup, the log is replayed to rebuild any unflushed memtable state.
 
 ### SSTables
 When the memtable is flushed, keys are sorted and written to a new file. These files are immutable — they're never modified after creation, only replaced during compaction. Because keys are sorted, lookups can use binary search rather than scanning the whole file.
