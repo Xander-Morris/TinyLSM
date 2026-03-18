@@ -271,15 +271,7 @@ class KVStore:
                 print(f"Bloom filter file does not exist for index {index_counter}!")
 
             try:
-                tuples = []
-
-                with open(f"sst_{index_counter}.index", 'r') as file: 
-                    for line in file: 
-                        line = line.strip() 
-                        key, offset = line.split(" ")
-                        offset = int(offset)
-                        tuples.append((key, offset))
-                
+                tuples = self._build_sstable_tuples(index_counter)
                 self.sparse_indexes[index_counter] = tuples 
             except FileNotFoundError:
                 print(f"Index file does not exist for index {index_counter}!")
