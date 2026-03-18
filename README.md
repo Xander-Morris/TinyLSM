@@ -8,8 +8,9 @@ This is a project I've worked on while reading Designing Data-Intensive Applicat
 python -m venv venv
 venv\Scripts\activate  # Windows
 pip install -r requirements.txt
-cd src
-python main.py
+python -m src.main       # run the REPL
+python -m src.benchmark  # run benchmarks
+pytest tests/            # run test suite
 ```
 
 In addition, feel free to run the test suite in the "tests" subfolder using the pytest library. It is designed to run through almost any test case you could think of. 
@@ -58,3 +59,15 @@ SSTables are organized into levels. L0 is where all flushes land and files here 
 
 ### Tombstones
 Deletes don't immediately remove data — they write a special tombstone marker. This is necessary because the key might exist in an older SSTable on disk. The tombstone propagates through compaction, at which point it's dropped entirely.
+
+## Benchmarks
+
+Run with `python -m src.benchmark`. Results on a Windows 11 machine (N=10,000):
+
+| Operation | Ops/sec |
+|-----------|---------|
+| Writes    | ~820    |
+| Reads     | ~8,800  |
+| Misses    | ~103,000 |
+
+Miss lookups are ~125x faster than reads — bloom filters eliminate file I/O entirely for keys that don't exist.
