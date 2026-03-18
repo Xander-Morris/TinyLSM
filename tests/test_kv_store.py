@@ -99,4 +99,9 @@ def test_restart_after_compaction(tmp_path):
     for key, value in setting.items():
         assert store.get(key) == value
 
-def test_
+def test_overwrite_key(tmp_path):
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore()
+    store.set("foo", "bar")
+    store.set("foo", "baz")
+    assert store.get("foo") == "baz"
