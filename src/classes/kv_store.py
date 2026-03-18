@@ -289,7 +289,7 @@ class KVStore:
                 print(f"Index file does not exist for index {index_counter}!")
 
         self.index_counter = index_counter
-        self.entries = sum(len(k) + len(v) for k, v in self._store.items() if v is not config.TOMBSTONE_VALUE and v is not None)
+        self.entries = sum(len(k) + len(v) for k, v in self._store.items() if v != config.TOMBSTONE_VALUE and v is not None)
 
     def _set(self, key: str, value: str):
         prev_value = self._store.get(key)
