@@ -308,7 +308,8 @@ class KVStore:
         prev_value = self._store.get(key)
         self._store[key] = config.TOMBSTONE_VALUE
 
-        if prev_value is not None:
+        # I only want to subtract the entries count when it was a valid value to begin with.
+        if prev_value is not None and prev_value != config.TOMBSTONE_VALUE:
             self.entries -= (len(key) + len(prev_value))
 
     # Public Methods 
