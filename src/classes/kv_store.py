@@ -175,6 +175,8 @@ class KVStore:
             for line in file: 
                 line = line.strip() 
                 inner_key, value = line.split(" ")
+                # The index files need the int_offset instead of just the string value. 
+                value = int(value) if index_file else value 
                 tuples.append((inner_key, value))
 
         return tuples
