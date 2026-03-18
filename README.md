@@ -66,8 +66,8 @@ Run with `python -m src.benchmark`. Results on a Windows 11 machine with a 4KB m
 
 | Operation | Ops/sec |
 |-----------|---------|
-| Writes    | ~4,900  |
-| Reads     | ~8,200  |
-| Misses    | ~47,500 |
+| Writes    | ~8,400  |
+| Reads     | ~8,900  |
+| Misses    | ~49,000 |
 
 Miss lookups are ~10x faster than reads — bloom filters eliminate file I/O entirely for keys that don't exist. The WAL uses a write buffer of 100 entries before flushing to disk, trading a small crash-recovery window for higher write throughput.
