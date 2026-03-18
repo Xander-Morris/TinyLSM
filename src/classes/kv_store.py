@@ -23,9 +23,6 @@ class KVStore:
             i = 0
 
             for key, value in sorted_store:
-                if value == config.TOMBSTONE_VALUE: 
-                    continue 
-
                 if min_key is None: 
                     min_key = key  
                 max_key = key 
@@ -45,10 +42,7 @@ class KVStore:
     def _write_bloom_filter(self, items, index):
         filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
 
-        for key, value in items:
-            if value == config.TOMBSTONE_VALUE:
-                continue 
-
+        for key, _ in items:
             filter.add(key)
 
         with open(f"sst_{index}.bloom", 'w') as file:
