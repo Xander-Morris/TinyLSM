@@ -115,9 +115,15 @@ def test_overwrite_key(tmp_path):
 def test_scan_across_flush_boundary(tmp_path):
     os.chdir(tmp_path)
     store = src.classes.kv_store.KVStore() 
+
+    def force_flush_for_this_test():
+        for i in range(config.MAX_ENTRIES):
+            # This is to force the flush keys to be something that sorts after "zilophone."
+            store.set(f"zzz_flush_{i}", "bar_test")
+
     setting1 = {"foo": "bar", "xander": "sadie"}
     do_setting(store, setting1)
-    force_flush(store)
+    force_flush_for_this_test()
     setting2 = {"apple": "banana", "foo": "bar", "xander": "sadie", "zilophone": "wala"}
     do_setting(store, setting2)
     
