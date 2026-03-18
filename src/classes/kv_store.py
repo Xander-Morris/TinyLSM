@@ -1,6 +1,7 @@
 import glob
 import os 
 import src.config as config 
+import src.utils as utils 
 import src.classes.bloom_filter as bloom_filter 
 import src.classes.manifest as manifest 
 
@@ -13,6 +14,13 @@ class KVStore:
         self.sparse_indexes = {}
         self.manifest = manifest.Manifest.load() 
         self._load_sstables()
+
+        try:
+            with open(config.LOG_FILE_NAME, 'r') as file:
+                for line in file: 
+                    utils.process_line(self, line, True)
+        except FileNotFoundError:
+            print("No file exists!")
 
     # Private Methods
     def _write_to_sstable_file(self, index, sorted_store):

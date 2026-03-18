@@ -30,3 +30,16 @@ def test_tombstone_after_flush(tmp_path):
     force_flush()
     store = src.classes.kv_store.KVStore() 
     assert store.get("foo") == None 
+
+def test_wal_replay(tmp_path):
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore()
+    setting = {"foo": "bar", "xander": "sadie"}
+
+    for key, value in setting.items():
+        store.set(key, value)
+
+    store = src.classes.kv_store.KVStore()
+
+    for key, value in setting.items():
+        assert store.get(key) == value 
