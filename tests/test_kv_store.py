@@ -87,3 +87,14 @@ def test_bloom_filter_false_negative(tmp_path):
     store.set("xander", "sadie")
     force_flush(store)
     assert store.get("xander") == "sadie" 
+
+def test_restart_after_compaction(tmp_path):
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore()
+    setting = {"foo": "bar", "xander": "sadie"}
+    do_setting(store, setting)
+    force_compaction(store)
+    store = src.classes.kv_store.KVStore()
+
+    for key, value in setting.items():
+        assert store.get(key) == value
