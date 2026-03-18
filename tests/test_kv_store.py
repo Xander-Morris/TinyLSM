@@ -111,3 +111,21 @@ def test_overwrite_key(tmp_path):
     force_flush(store) 
     store.set("foo", "baz")
     assert store.get("foo") == "baz"
+
+def test_scan_across_flush_boundary(tmp_path):
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore() 
+    setting1 = {"foo": "bar", "xander": "sadie"}
+    do_setting(store, setting1)
+    force_flush(store)
+    setting2 = {"apple": "banana", "foo": "bar", "xander": "sadie", "zilophone": "wala"}
+    do_setting(store, setting2)
+    
+    def test_setting_has_key_value_pairs(setting):
+        for key, value in setting.items():
+            assert store.get(key) == value
+
+    test_setting_has_key_value_pairs(setting1)
+    test_setting_has_key_value_pairs(setting2)
+    result = store.scan("apple", "zilophone")
+    assert result == [("apple", "banana"), ("foo", "bar"), ("xander", "sadie"), ("zilophone", "wala")]
