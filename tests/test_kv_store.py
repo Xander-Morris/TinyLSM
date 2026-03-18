@@ -1,6 +1,6 @@
 import pytest 
 import src.classes.kv_store 
-import src.config 
+import src.config as config 
 import os 
 
 def test_set_get(tmp_path):
@@ -16,3 +16,17 @@ def test_set_delete_get(tmp_path):
     store.delete("foo")
     assert store.get("foo") == None 
 
+def test_tombstone_after_flush(tmp_path):
+    os.chdir(tmp_path)
+    store = src.classes.kv_store.KVStore()
+    store.set("foo", "bar")
+
+    def force_flush():
+        for i in range(config.MAX_ENTRIES):
+            store.set(f"foo_{i}", "bar_test")
+    
+    force_flush()
+    store.delete("foo")
+    force_flush()
+    store = src.classes.kv_store.KVStore() 
+    assert store.get("foo") == None 
