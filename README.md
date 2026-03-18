@@ -13,8 +13,6 @@ python -m src.benchmark  # run benchmarks
 pytest tests/            # run test suite
 ```
 
-In addition, feel free to run the test suite in the "tests" subfolder using the pytest library. It is designed to run through almost any test case you could think of. 
-
 Once running, the REPL accepts the following commands:
 
 ```
