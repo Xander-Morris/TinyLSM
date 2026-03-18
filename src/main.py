@@ -1,5 +1,5 @@
 import src.utils as utils 
-from classes import kv_store 
+from src.classes import kv_store 
 
 def main():
     store = kv_store.KVStore()

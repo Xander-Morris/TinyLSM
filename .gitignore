@@ -8,3 +8,5 @@ __pycache__/
 .vscode
 log_file.txt
 sst_*
+manifest.json 
+tinylsm.egg-info/
