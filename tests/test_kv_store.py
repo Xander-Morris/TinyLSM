@@ -118,3 +118,17 @@ def test_scan_across_flush_boundary(store):
     assert_all_readable(store, setting2)
     result = store.scan("apple", "zilophone")
     assert result == [("apple", "banana"), ("foo", "bar"), ("xander", "sadie"), ("zilophone", "wala")]
+
+def test_scan_overwrite_after_flush(store):
+    store.set("foo", "bar")
+    force_flush(store)
+    store.set("foo", "baz")
+    result = store.scan("foo", "foo")
+    assert result == [("foo", "baz")]
+
+def test_scan_delete_after_flush(store):
+    store.set("foo", "bar")
+    force_flush(store)
+    store.delete("foo")
+    result = store.scan("foo", "foo")
+    assert result == []
