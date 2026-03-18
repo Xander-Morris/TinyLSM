@@ -14,6 +14,7 @@ class KVStore:
         self._store = {}
         self.entries = 0
         self.index_counter = 0
+        self._wal_buffer_count = 0
         self.bloom_filters = {}
         self.sparse_indexes = {}
         self.manifest = manifest.Manifest.load() 
@@ -29,6 +30,13 @@ class KVStore:
         self._wal = open(config.LOG_FILE_NAME, 'a')
 
     # Private Methods
+    def _increment_wall_buffer_count(self):
+        self._wal_buffer_count += 1
+
+        if self._wal_buffer_count >= config.WAL_BUFFER_SIZE:
+            self._wal.flush()
+            self._wal_buffer_count = 0
+
     def _replay_line(self, line):
         line = line.strip()
         sp = line.split(" ")
@@ -143,6 +151,7 @@ class KVStore:
         self._update_manifest(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
         self._store = {}
         self.entries = 0 
+        self._wal.flush()
         self._wal.close()
         self._wal = open(config.LOG_FILE_NAME, 'w')
         self._wal.close()
@@ -185,9 +194,7 @@ class KVStore:
 
     def _search_sstables(self, key):
         sorted_entries = sorted(self.manifest.entries, 
-                                key=lambda entry: 
-                                (0, -KVStore._sst_index(entry) if entry["level"] == 0 
-                                else (entry["level"], 0)))
+            key=lambda entry: (0, -(KVStore._sst_index(entry))) if entry["level"] == 0 else (entry["level"], 0))
 
         for entry in sorted_entries:
             if entry["level"] > 0 and (key > entry["max_key"] or key < entry["min_key"]):
@@ -282,16 +289,16 @@ class KVStore:
                 print(f"Index file does not exist for index {index_counter}!")
 
         self.index_counter = index_counter
-        self.entries = sum(1 for v in self._store.values() if v is not config.TOMBSTONE_VALUE and v is not None)
+        self.entries = sum(len(k) + len(v) for k, v in self._store.items() if v is not config.TOMBSTONE_VALUE and v is not None)
 
     def _set(self, key: str, value: str):
         prev_value = self._store.get(key)
         self._store[key] = value 
 
         if value is not None and prev_value is None:
-            self.entries += 1
+            self.entries += len(key) + len(value)
         
-        if self.entries < config.MAX_ENTRIES:
+        if self.entries < config.MAX_MEMTABLE_SIZE:
             return 
 
         # Do the flush 
@@ -302,12 +309,12 @@ class KVStore:
         self._store[key] = config.TOMBSTONE_VALUE
 
         if prev_value is not None:
-            self.entries -= 1
+            self.entries -= (len(key) + len(prev_value))
 
     # Public Methods 
     def set(self, key: str, value: str):
         self._wal.write(f"SET {key} {value}\n")
-        self._wal.flush()
+        self._increment_wall_buffer_count()
         self._set(key, value)
 
     def get(self, key: str):
@@ -322,8 +329,12 @@ class KVStore:
 
     def delete(self, key: str):
         self._wal.write(f"DELETE {key}\n")
-        self._wal.flush()
+        self._increment_wall_buffer_count()
         self._delete(key)
+
+    def close(self):
+        self._wal.flush()
+        self._wal.close()
 
     def scan(self, start: str, end: str):
         entries = {}

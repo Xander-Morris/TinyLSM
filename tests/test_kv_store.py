@@ -4,13 +4,24 @@ import src.config as config
 import os 
 
 def force_flush(store, make_sure_after_normal_entries=False):
-    for i in range(config.MAX_ENTRIES):
+    bytes_written = 0
+    i = 0
+
+    while bytes_written < config.MAX_MEMTABLE_SIZE + 1:
         s = f"zzz_flush_{i}" if make_sure_after_normal_entries else f"foo_{i}"
         store.set(s, "bar_test")
+        bytes_written += len(s) + len("bar_test")
+        i += 1
 
 def force_compaction(store):
-    for i in range(config.MAX_ENTRIES * config.MAX_L0_FILES + 1):
-        store.set(f"compact_{i}", "bar_test")
+    bytes_written = 0
+    i = 0
+    
+    while bytes_written < (config.MAX_MEMTABLE_SIZE + 1) * (config.MAX_L0_FILES + 1):
+        s = f"compact_{i}"
+        store.set(s, "bar_test")
+        bytes_written += len(s) + len("bar_test")
+        i += 1
 
 def do_setting(store, setting):
     for key, value in setting.items():
@@ -40,12 +51,14 @@ def test_tombstone_after_flush(store):
     force_flush(store)
     store.delete("foo")
     force_flush(store)
+    store.close()
     store = src.classes.kv_store.KVStore() 
     assert store.get("foo") == None 
 
 def test_wal_replay(store):
     setting = {"foo": "bar", "xander": "sadie"}
     do_setting(store, setting)
+    store.close()
     store = src.classes.kv_store.KVStore()
     assert_all_readable(store, setting)
 
@@ -80,6 +93,7 @@ def test_restart_after_compaction(store):
     setting = {"foo": "bar", "xander": "sadie"}
     do_setting(store, setting)
     force_compaction(store)
+    store.close()
     store = src.classes.kv_store.KVStore()
     assert_all_readable(store, setting)
 
