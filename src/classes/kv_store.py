@@ -340,22 +340,22 @@ class KVStore:
     def scan(self, start: str, end: str):
         entries = {}
 
-        for key, value in self._store.items():
-            if value == config.TOMBSTONE_VALUE:
-                continue
-
-            if key >= start and key <= end:
-                entries[key] = value 
-
         for entry in self.manifest.entries:
             index = KVStore._sst_index(entry)
             tuples = self._build_sstable_tuples(index)
 
             for key, value in tuples:
-                if value == config.TOMBSTONE_VALUE:
-                    continue
-
                 if key >= start and key <= end:
-                    entries[key] = value 
+                    if value == config.TOMBSTONE_VALUE:
+                        entries.pop(key, None)
+                    else:
+                        entries[key] = value
+
+        for key, value in self._store.items():
+            if key >= start and key <= end:
+                if value == config.TOMBSTONE_VALUE:
+                    entries.pop(key, None)
+                else:
+                    entries[key] = value
 
         return [(key, entries[key]) for key in sorted(entries)]
