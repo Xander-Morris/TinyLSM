@@ -31,7 +31,9 @@ class KVStore:
     def _write_sstable(self, index, data):
         write_result = self._write_to_sstable_file(index, data)
         self.sparse_indexes[index] = write_result[0]
-        self._write_bloom_filter(data, self.index_counter)
+        self._write_bloom_filter(data, index)
+
+        return write_result 
 
     def _write_to_sstable_file(self, index, sorted_store):
         sparse = []
@@ -96,7 +98,7 @@ class KVStore:
 
         for entry in entries + next_entries: 
             # Remove all files used by the index 
-            index = int(entry["file_name"].split("_")[1])
+            index = KVStore._sst_index(entry)
             os.remove(f"sst_{index}")
             os.remove(f"sst_{index}.bloom")
             os.remove(f"sst_{index}.index")
@@ -109,9 +111,7 @@ class KVStore:
         for i in range(0, len(merged), sstable_file_size):
             chunk = merged[i:i + sstable_file_size]
             self.index_counter += 1
-            write_result = self._write_to_sstable_file(self.index_counter, chunk)
-            self.sparse_indexes[self.index_counter] = write_result[0]
-            self._write_bloom_filter(chunk, self.index_counter)
+            self._write_sstable(self.index_counter, chunk)
             self._update_manifest(level + 1, f"sst_{self.index_counter}", chunk[0][0], chunk[-1][0])
 
     def _compact(self):
@@ -130,10 +130,8 @@ class KVStore:
     def _flush(self):
         self.index_counter += 1
         sorted_store = sorted(self._store.items())
-        write_result = self._write_to_sstable_file(self.index_counter, sorted_store)
-        self.sparse_indexes[self.index_counter] = write_result[0]
+        write_result = self._write_sstable(self.index_counter, sorted_store)
         self._update_manifest(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
-        self._write_bloom_filter(self._store.items(), self.index_counter)
         self._store = {}
         self.entries = 0 
 
@@ -176,14 +174,14 @@ class KVStore:
     def _search_sstables(self, key):
         sorted_entries = sorted(self.manifest.entries, 
                                 key=lambda entry: 
-                                (0, -int(entry["file_name"].split("_")[1])) if entry["level"] == 0 
-                                else (entry["level"], 0))
+                                (0, -(KVStore._sst_index(entry)) if entry["level"] == 0 
+                                else (entry["level"], 0)))
 
         for entry in sorted_entries:
             if entry["level"] > 0 and (key > entry["max_key"] or key < entry["min_key"]):
                 continue 
 
-            index = int(entry["file_name"].split("_")[1])
+            index = KVStore._sst_index(entry)
 
             if not self.bloom_filters[index].contains(key):
                 continue 
@@ -334,7 +332,7 @@ class KVStore:
                 entries[key] = value 
 
         for entry in self.manifest.entries:
-            index = int(entry["file_name"].split("_")[1])
+            index = KVStore._sst_index(entry)
             tuples = self._build_sstable_tuples(index)
 
             for key, value in tuples:
