@@ -212,10 +212,8 @@ class KVStore:
 
     def _flush(self):
         self._index_counter += 1
-        flattened = {}
-        for key, tuples in self._store.items(): 
-            flattened[key] = tuples[-1][1]
-        write_result = self._write_sstable(self._index_counter, sorted(flattened.items()))
+        sorted_store = sorted(self._store.items())
+        write_result = self._write_sstable(self._index_counter, sorted_store)
         self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
         self._store = {}
         self._entries = 0 
