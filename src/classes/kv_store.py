@@ -191,9 +191,9 @@ class KVStore:
         for key in merged:
             merged[key].sort(key=lambda x: x[0]) # Sort each key's versions by seq before compacting.
 
-        merged = sorted(merged.items())
         read_from_entries_list(next_entries) 
         read_from_entries_list(entries)
+        merged = sorted(merged.items())
 
         for entry in entries + next_entries: 
             # Remove all files used by the index 
