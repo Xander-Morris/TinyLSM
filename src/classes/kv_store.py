@@ -121,6 +121,12 @@ class KVStore:
             self._wal.flush()
             self._wal_buffer_count = 0
 
+    def _restore_key_seq_value(self, key: str, seq: int, value: str):
+        if key not in self._store:
+            self._store[key] = []
+        self._store[key].append((seq, value))
+        self._seq = max(self._seq, seq)
+
     def _replay_line(self, line):
         line = line.strip()
         sp = line.split(" ")
@@ -303,8 +309,8 @@ class KVStore:
             with open(file_name, 'r') as file:
                 for line in file: 
                     line = line.strip()
-                    key, value = KVStore._parse_sstable_line(line)
-                    self._set_key_seq_value(key, value)
+                    key, seq, value = KVStore._parse_sstable_line(line)
+                    self._restore_key_seq_value(key, seq, value)
             
             try:
                 with open(f"sst_{index_counter}.bloom", 'r') as file: 
