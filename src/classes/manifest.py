@@ -1,4 +1,5 @@
 import json
+import os 
 
 class Manifest: 
     # Static Methods
@@ -25,8 +26,10 @@ class Manifest:
         self.entries = [entry for entry in self.entries if entry["file_name"] != file_name]
     
     def save(self):
-        with open("manifest.json", 'w') as file: 
+        with open("manifest.tmp", 'w') as file: 
             json.dump(self.entries, file)
+        # This is atomic on both Windows and Linux, so it can never be in a partial state, which would cause corruption. 
+        os.replace("manifest.tmp", "manifest.json")
 
     def clear(self):
         self.entries = []
