@@ -41,13 +41,13 @@ BENCHMARK_N=100000                 # number of operations to run in the benchmar
 ## Architecture
 
 ### Memtable
-Writes go into an in-memory dictionary first. No disk I/O on the write path, so writes are fast. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
+Writes go into an in-memory dictionary first. There is no disk I/O on the write path, so the writes are very fast. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to the disk drive as an SSTable.
 
 ### Write-Ahead Log (WAL)
-Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup the log is replayed to recover any writes that hadn't been flushed yet.
+Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup, the log is replayed to recover any writes that hadn't been flushed yet.
 
 ### SSTables
-When the memtable flushes, keys are sorted and written to a new file. SSTables are immutable after creation and only get replaced during compaction. Sorted keys mean lookups can binary search instead of scanning the whole file.
+When the memtable flushes, keys are sorted and written to a new file. Keys are sorted on flush and written to an immutable file. Reads binary search instead of scanning. 
 
 ### Bloom Filters
 Each SSTable has a bloom filter. Before reading an SSTable for a key, the filter is checked first. If it says the key isn't there, the file read is skipped entirely. This makes misses cheap no matter how many SSTables exist.
@@ -84,7 +84,7 @@ A read-write lock lets multiple `get` and `scan` calls run in parallel while wri
 
 ## Benchmarks
 
-Run with `python -m src.benchmark`. Results on a personal Windows 11 machine with a 4KB memtable and N=100,000:
+Run with `python -m src.benchmark`. These results are from my personal Windows 11 machine with a 4KB memtable and N=100,000:
 
 | Operation          | Ops/sec |
 |--------------------|---------|
@@ -93,4 +93,4 @@ Run with `python -m src.benchmark`. Results on a personal Windows 11 machine wit
 | Reads (4 threads)  | ~8,000  |
 | Misses             | ~18,000 |
 
-Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. 4 threads is the sweet spot for concurrent reads on this machine. Beyond that, lock contention and GIL overhead cancel out the gains from parallelism. The WAL buffer trades a small crash-recovery window for better write throughput.
+Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since I don't see a gain in performance past that point. The increase from 1 to 4 threads in performance is consistent, yet marginal. This is likely due to the fact that the multithreading approach using the Python conventions I'm using don't provide true multithreading in the same sense that you would think, although it is still a marginal improvement. 
