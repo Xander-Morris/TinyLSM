@@ -1,4 +1,5 @@
 import threading 
+from contextlib import contextmanager 
 
 class ReadWriteLock:
     def __init__(self):
@@ -30,3 +31,21 @@ class ReadWriteLock:
         with self._condition: 
             self._writing = False 
             self._condition.notify_all()
+
+    @contextmanager 
+    def read(self):
+        self.acquire_read()
+
+        try:
+            yield 
+        finally:
+            self.release_read()
+
+    @contextmanager
+    def write(self):
+        self.acquire_write()
+
+        try:
+            yield 
+        finally:
+            self.release_write()
