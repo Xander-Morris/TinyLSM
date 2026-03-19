@@ -56,7 +56,7 @@ class KVStore:
         return (sparse, min_key, max_key)
 
     @staticmethod
-    def _binary_search(tuples, key):
+    def _binary_search(tuples, key, at=None):
         low = 0
         high = len(tuples) - 1
 
@@ -229,7 +229,7 @@ class KVStore:
         if l0_count >= config.MAX_L0_FILES:
             self._compact()
 
-    def _search_sstables(self, key):
+    def _search_sstables(self, key, at=None):
         sorted_entries = sorted(self._manifest.entries, 
             key=lambda entry: (0, -(KVStore._sst_index(entry))) if entry["level"] == 0 else (entry["level"], 0))
 
@@ -264,7 +264,7 @@ class KVStore:
         
         return None 
     
-    def _search_sstable_with_index(self, index, key):
+    def _search_sstable_with_index(self, index, key, at=None):
         if not self._sparse_indexes[index]:
             print(f"No sparse index exists in the sparse_indexes dictionary for {index}!")
             return
