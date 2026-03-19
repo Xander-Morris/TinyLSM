@@ -47,7 +47,7 @@ Writes go into an in-memory dictionary first. There is no disk I/O on the write 
 Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup, the log is replayed to recover any writes that hadn't been flushed yet.
 
 ### SSTables
-When the memtable flushes, keys are sorted and written to a new file. Keys are sorted on flush and written to an immutable file. Reads binary search instead of scanning. 
+When the memtable flushes, keys are sorted and written to a new file. Reads binary search instead of scanning. 
 
 ### Bloom Filters
 Each SSTable has a bloom filter. Before reading an SSTable for a key, the filter is checked first. If it says the key isn't there, the file read is skipped entirely. This makes misses cheap no matter how many SSTables exist.
@@ -93,4 +93,4 @@ Run with `python -m src.benchmark`. These results are from my personal Windows 1
 | Reads (4 threads)  | ~8,000  |
 | Misses             | ~18,000 |
 
-Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since I don't see a gain in performance past that point. The increase from 1 to 4 threads in performance is consistent, yet marginal. This is likely due to the fact that the multithreading approach using the Python conventions I'm using don't provide true multithreading in the same sense that you would think, although it is still a marginal improvement. 
+Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since I don't see a gain in performance past that point. The increase from 1 to 4 threads in performance is consistent, yet marginal. Past 4 threads, the GIL overhead outweighs the performance gains from parallelism for the I/O operations. 
