@@ -110,3 +110,11 @@ def test_stats(store):
     stats = store.stats()
     assert stats["memtable_keys"] >= 1
     assert stats["memtable_size_bytes"] > 0
+
+def test_sequence_behavior(store):
+    store.set("foo", "bar")
+    seq = store._seq 
+    store.set("foo", "baz")
+    assert store.get("foo") == "baz"
+    assert store.get("foo", at=seq) == "bar"
+    assert store.get("foo", at=seq - 1) == None
