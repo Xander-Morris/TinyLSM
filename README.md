@@ -41,7 +41,7 @@ BENCHMARK_N=100000                 # number of operations to run in the benchmar
 ## Architecture
 
 ### Memtable
-Writes go into an in-memory dictionary first. There is no disk I/O on the write path, so the writes are very fast. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to the disk drive as an SSTable.
+Writes go into an in-memory dictionary first. There is no disk I/O on the write path, so the writes are very fast. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
 
 ### Write-Ahead Log (WAL)
 Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup, the log is replayed to recover any writes that hadn't been flushed yet.
@@ -68,7 +68,7 @@ The `stats()` method returns a snapshot of the store's current state:
 - `memtable_keys`: number of live keys currently in the memtable
 
 ### MVCC (Snapshot Reads)
-Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`, allowing reads at a specific point in time. When the memtable is flushed, only the latest version of each key is written to disk.
+Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`. When the memtable is flushed, only the latest version of each key is written to disk.
 
 ### Tombstones
 Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction and dropped at the end.
