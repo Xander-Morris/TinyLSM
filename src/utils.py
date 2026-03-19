@@ -25,5 +25,7 @@ def process_line(store, line):
             print("2 arguments are required for GET!")
         else:
             return f"Key {sp[1]} has value of {store.get(sp[1])}"
+    elif operation == "STATS":
+        return store.stats()
     else:
         print(f"Invalid operation: {operation}!")
