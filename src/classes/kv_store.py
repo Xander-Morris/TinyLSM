@@ -364,6 +364,8 @@ class KVStore:
                 raw_value = versions[-1][1]
                 
                 if at is not None: 
+                    raw_value = None 
+
                     for i in range(len(versions) - 1, -1, -1):
                         if versions[i][0] <= at:
                             raw_value = versions[i][1]
