@@ -41,7 +41,7 @@ BENCHMARK_N=100000                 # number of operations to run in the benchmar
 ## Architecture
 
 ### Memtable
-Writes go into an in-memory dictionary first. There is no disk I/O on the write path, so the writes are very fast. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
+Writes go into an in-memory dictionary first. Since there is no disk I/O on the write path, the writes are fairly quick. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
 
 ### Write-Ahead Log (WAL)
 Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup, the log is replayed to recover any writes that hadn't been flushed yet.
