@@ -55,6 +55,15 @@ class KVStore:
 
         return (sparse, min_key, max_key)
 
+    @staticmethod 
+    def _pick_version(versions, at=None):
+        if at is None:
+            return versions[-1][1]
+        else:
+            for i in range(len(versions), -1, -1):
+                if versions[i][0] <= at:
+                    return versions[i][1]
+
     @staticmethod
     def _binary_search(tuples, key, at=None):
         low = 0
@@ -65,7 +74,9 @@ class KVStore:
             key_at_mid = tuples[mid][0]
 
             if key == key_at_mid:
-                return tuples[mid][1] # return value
+                versions = [(seq, value) for k, seq, value in tuples if k == key]
+
+                return KVStore._pick_version(versions, at)
             elif key < key_at_mid:
                 high = mid - 1
             else:
@@ -84,7 +95,8 @@ class KVStore:
                 if index_file:
                     inner_key, value = line.split(" ")
                 else:
-                    inner_key, value = KVStore._parse_sstable_line(line)
+                    inner_key, seq, value = KVStore._parse_sstable_line(line)
+                    tuples.append((inner_key, seq, value))
                 # The index files need the int_offset instead of just the string value.
                 value = int(value) if index_file else value
                 tuples.append((inner_key, value))
