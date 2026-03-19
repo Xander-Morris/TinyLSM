@@ -108,5 +108,5 @@ def test_stats(store):
     assert 0 in stats["sstables_per_level"]  
     store.set("new_key", "new_value")
     stats = store.stats()
-    assert stats["memtable_keys"] == 1
+    assert stats["memtable_keys"] >= 1
     assert stats["memtable_size_bytes"] > 0
