@@ -5,6 +5,7 @@ import src.classes.bloom_filter as bloom_filter
 import src.classes.manifest as manifest 
 import src.classes.read_write_lock as read_write_lock
 import binascii
+from collections import defaultdict as defaultdict 
 
 class KVStore:
     # Static Methods
@@ -391,3 +392,23 @@ class KVStore:
 
         self._wal.flush()
         self._wal.close()
+
+    def stats(self):
+        # SSTable count per level is calculated first.
+        mp = defaultdict(int)
+
+        for entry in self._manifest.entries: 
+            mp[entry["level"]] += 1
+        
+        # The total SSTable count is next, which is just the length of the manifest entries list.
+        sstable_count = len(self._manifest.entries)
+
+        # Total disk size is next.
+        total_disk_size = 0
+        sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
+
+        for file_name in sst_file_names:
+            with open(file_name, 'r') as file:
+                total_disk_size += os.path.getsize(file)
+
+        
