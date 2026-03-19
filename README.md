@@ -80,4 +80,4 @@ Run with `python -m src.benchmark`. Results on a personal Windows 11 machine wit
 | Reads (4 threads)  | ~8,000  |
 | Misses             | ~18,000 |
 
-Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. 4 threads is the sweet spot for concurrent reads on this machine — beyond that, lock contention and GIL overhead cancel out the gains from parallelism. The WAL buffer trades a small crash-recovery window for better write throughput.
+Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. 4 threads is the sweet spot for concurrent reads on this machine. Beyond that, lock contention and GIL overhead cancel out the gains from parallelism. The WAL buffer trades a small crash-recovery window for better write throughput.
