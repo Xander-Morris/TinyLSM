@@ -11,12 +11,14 @@ class ReadWriteLock:
             while self._writing:
                 self._condition.wait()
         
-        self._readers += 1 
+            self._readers += 1 
 
     def release_read(self):
-        self._readers -= 1
+        with self._condition: 
+            self._readers -= 1
 
-        if self._readers > 0:
-            return
+            if self._readers > 0:
+                return
 
-        # Notify waiting writers that the _readers count is 0.
+            # Notify waiting writers that the _readers count is 0.
+            self._condition.notify_all()
