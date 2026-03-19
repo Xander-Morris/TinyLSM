@@ -12,7 +12,7 @@ class Manifest:
                 obj.entries = lst 
 
                 return obj 
-        except FileNotFoundError:
+        except (FileNotFoundError, json.JSONDecodeError):
             return Manifest()
 
     def __init__(self):
