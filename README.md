@@ -20,6 +20,7 @@ SET key value      # write a key-value pair
 GET key            # read a value by key
 DELETE key         # delete a key
 SCAN key1 key2     # return all keys in the range [key1, key2]
+STATS              # print store statistics
 EXIT               # quit
 ```
 
@@ -56,6 +57,15 @@ Each SSTable has a sparse index: a sampled list of keys and their byte offsets, 
 
 ### Leveled Compaction
 SSTables are organized into levels. All flushes land in L0, where files can have overlapping key ranges. When L0 hits `MAX_L0_FILES`, it compacts into L1 by merging with any overlapping L1 files. Each level is 10x larger than the last, so if L1 overflows the process cascades to L2, and so on. A manifest file (`manifest.json`) tracks each SSTable's level and key range.
+
+### Stats API
+The `stats()` method returns a snapshot of the store's current state:
+
+- `sstable_count` — total number of SSTables across all levels
+- `sstables_per_level` — SSTable count broken down by level
+- `total_size_bytes` — total size of all SSTable files on disk
+- `memtable_size_bytes` — current memtable size in bytes
+- `memtable_keys` — number of live keys currently in the memtable
 
 ### Tombstones
 Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction and dropped at the end.
