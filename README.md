@@ -50,13 +50,13 @@ Every write goes to the WAL and memtable together. WAL writes are buffered and f
 When the memtable flushes, keys are sorted and written to a new file. Reads binary search instead of scanning. 
 
 ### Bloom Filters
-Each SSTable has a bloom filter. Before reading an SSTable for a key, the filter is checked first. If it says the key isn't there, the file read is skipped entirely. This makes misses cheap no matter how many SSTables exist.
+Each SSTable has a bloom filter. Before reading an SSTable for a key, the filter is checked first. If it says the key isn't there, the file read is skipped entirely. Lookups for missing keys stay fast regardless of how many SSTables are on disk. 
 
 ### Sparse Index
-Each SSTable has a sparse index: a sampled list of keys and their byte offsets, recorded every N entries. On lookup the sparse index is binary searched to find the closest offset, then the file is seeked directly to that point instead of reading from the start.
+Each SSTable has a sparse index: a sampled list of keys and their byte offsets, recorded every N entries. On lookup the sparse index is binary searched to find the closest offset, then the file seek jumps directly to that point. 
 
 ### Leveled Compaction
-SSTables are organized into levels. All flushes land in L0, where files can have overlapping key ranges. When L0 hits `MAX_L0_FILES`, it compacts into L1 by merging with any overlapping L1 files. Each level is 10x larger than the last, so if L1 overflows the process cascades to L2, and so on. A manifest file (`manifest.json`) tracks each SSTable's level and key range.
+SSTables are organized into levels. All flushes land in L0, where files can have overlapping key ranges. When L0 hits `MAX_L0_FILES`, it compacts into L1 by merging with any overlapping L1 files. Each level is 10x larger than the last, so if L1 overflows, then it cascades down. A manifest file (`manifest.json`) tracks each SSTable's level and key range.
 
 ### Stats API
 The `stats()` method returns a snapshot of the store's current state:
