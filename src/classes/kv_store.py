@@ -5,7 +5,6 @@ import src.classes.bloom_filter as bloom_filter
 import src.classes.manifest as manifest 
 import src.classes.read_write_lock as read_write_lock
 import binascii
-from collections import defaultdict as defaultdict 
 
 class KVStore:
     # Static Methods
@@ -339,6 +338,7 @@ class KVStore:
             self._entries -= (len(key) + len(prev_value))
 
     # Public Methods 
+    # Read Operations
     def get(self, key: str):
         with self._lock.read():
             raw_value = None
@@ -374,6 +374,39 @@ class KVStore:
 
             return [(key, entries[key]) for key in sorted(entries)]
         
+    def stats(self):
+        with self._lock.read():
+            # SSTable count per level is calculated first.
+            mp = {}
+
+            for entry in self._manifest.entries: 
+                mp[entry["level"]] = mp.get(entry["level"], 0) + 1
+            
+            # The total SSTable count is next, which is just the length of the manifest entries list.
+            sstable_count = len(self._manifest.entries)
+
+            # Total disk size is next.
+            total_disk_size = 0
+            sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
+
+            for file_name in sst_file_names:
+                total_disk_size += os.path.getsize(file_name)
+
+            # The memtable size is next, which is just the entries variable.
+            memtable_size = self._entries 
+
+            # Number of *live* keys (not tombstones) in the memtable is next. 
+            keys_num = sum([1 for key, value in self._store.items() if value != config.TOMBSTONE_VALUE and value is not None])
+
+            return {
+                "sstable_count": sstable_count, 
+                "sstables_per_level": mp, 
+                "total_size_bytes": total_disk_size,
+                "memtable_size_bytes": memtable_size,
+                "memtable_keys": keys_num,
+            }
+        
+    # Write Operations
     def set(self, key: str, value: str):
         with self._lock.write():
             self._wal.write(f"SET {key} {value}\n")
@@ -386,29 +419,10 @@ class KVStore:
             self._increment_wall_buffer_count()
             self._delete(key)
 
+    # Close
     def close(self):
         if self._wal.closed:
             return
 
         self._wal.flush()
         self._wal.close()
-
-    def stats(self):
-        # SSTable count per level is calculated first.
-        mp = defaultdict(int)
-
-        for entry in self._manifest.entries: 
-            mp[entry["level"]] += 1
-        
-        # The total SSTable count is next, which is just the length of the manifest entries list.
-        sstable_count = len(self._manifest.entries)
-
-        # Total disk size is next.
-        total_disk_size = 0
-        sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
-
-        for file_name in sst_file_names:
-            with open(file_name, 'r') as file:
-                total_disk_size += os.path.getsize(file)
-
-        
