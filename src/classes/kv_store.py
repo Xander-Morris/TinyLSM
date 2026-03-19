@@ -29,19 +29,25 @@ class KVStore:
 
         with open(f"sst_{index}", 'w') as file:
             i = 0
+            key_count = 0
 
-            for key, value in sorted_store:
-                if min_key is None:
-                    min_key = key
-                max_key = key
-                i += 1
-                offset = file.tell()
-                line = f"{key} {value}"
-                checksum = binascii.crc32(line.encode())
-                file.write(f"{line} {checksum}\n")
+            for key, versions in sorted_store:
+                key_count += 1
+                first_version = True
 
-                if i % config.SPARSE_INDEX_N == 0:
-                    sparse.append((key, offset))
+                for seq, value in versions:
+                    if min_key is None:
+                        min_key = key
+                    max_key = key
+                    i += 1
+                    offset = file.tell()
+                    line = f"{key} {seq} {value}"
+                    checksum = binascii.crc32(line.encode())
+                    file.write(f"{line} {checksum}\n")
+
+                    if first_version and key_count % config.SPARSE_INDEX_N == 0:
+                        sparse.append((key, offset))
+                        first_version = False 
 
         with open(f"sst_{index}.index", 'w') as file:
             for key, offset in sparse:
