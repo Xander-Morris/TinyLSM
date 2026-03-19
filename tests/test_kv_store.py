@@ -59,7 +59,7 @@ def test_restart_after_compaction(store):
     do_setting(store, setting)
     force_compaction(store)
     store.close()
-    store = src.classes.kv_store.KVStore()
+    store = kv_store.KVStore()
     assert_all_readable(store, setting)
 
 def test_overwrite_key(store):
