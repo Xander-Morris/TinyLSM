@@ -355,12 +355,19 @@ class KVStore:
 
     # Public Methods 
     # Read Operations
-    def get(self, key: str):
+    def get(self, key: str, at=None):
         with self._lock.read():
             raw_value = None
 
             if key in self._store:
-                raw_value = self._store.get(key)
+                versions = self._store.get(key)
+                raw_value = versions[-1][1]
+                
+                if at is not None: 
+                    for i in range(len(versions[-1], -1, -1)):
+                        if versions[i][0] <= at:
+                            raw_value = versions[i][1]
+                            break
             else:
                 raw_value = self._search_sstables(key)
             
