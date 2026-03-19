@@ -203,7 +203,7 @@ class KVStore:
         flattened = {}
         for key, tuples in self._store.items(): 
             flattened[key] = tuples[-1][1]
-        write_result = self._write_sstable(self._index_counter, flattened)
+        write_result = self._write_sstable(self._index_counter, sorted(flattened.items()))
         self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
         self._store = {}
         self._entries = 0 
