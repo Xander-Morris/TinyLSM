@@ -27,4 +27,4 @@ def test_manifest_corruption(store):
         file.write("garbage corruption")
     
     store = kv_store.KVStore()
-    assert store != None 
+    assert store._manifest.entries == []
