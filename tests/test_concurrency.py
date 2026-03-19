@@ -5,7 +5,7 @@ def test_concurrent_reads_consistency(store):
     n = 4
 
     for i in range(n):
-        store.set(f"test_{i}", f"test_{i} value")
+        store.set(f"test_{i}", f"test_value_{i}")
     
     force_flush(store)
     results = []
@@ -18,9 +18,17 @@ def test_concurrent_reads_consistency(store):
             with lock:
                 results.append((f"test_{i}", value))
 
+    threads = []
+
     for i in range(n):
         thread = threading.Thread(target=worker, args=(i, i + 1))
+        threads.append(thread)
         thread.start() 
-        thread.join()
+
+    for thread in threads:
+        thread.join() 
     
     assert len(results) == n
+
+    for i in range(n):
+        assert store.get(f"test_{i}") == f"test_value_{i}"
