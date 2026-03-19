@@ -312,7 +312,11 @@ class KVStore:
                 print(f"Index file does not exist for index {index_counter}!")
 
         self._index_counter = index_counter
-        self._entries = sum(len(k) + len(v) for k, v in self._store.items() if v != config.TOMBSTONE_VALUE and v is not None)
+        self._entries = sum(
+            len(k) + len(versions[-1][1])
+            for k, versions in self._store.items()
+            if versions and versions[-1][1] != config.TOMBSTONE_VALUE
+        )
 
     def _set_key_seq_value(self, key: str, value: str):
         self._seq += 1
@@ -320,9 +324,13 @@ class KVStore:
             self._store[key] = []
         self._store[key].append((self._seq, value))
 
-    def _set(self, key: str, value: str):
+    def _get_prev_value(self, key: str):
         versions = self._store.get(key)
-        prev_value = versions[-1][1] if versions else None
+
+        return versions[-1][1] if versions else None
+
+    def _set(self, key: str, value: str):
+        prev_value = self._get_prev_value(key)
         self._set_key_seq_value(key, value)
 
         if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
@@ -338,7 +346,7 @@ class KVStore:
         self._flush()
 
     def _delete(self, key: str):
-        prev_value = self._store.get(key)
+        prev_value = self._get_prev_value(key)
         self._set_key_seq_value(key, config.TOMBSTONE_VALUE)
 
         # I only want to subtract the entries count when it was a valid value to begin with.
