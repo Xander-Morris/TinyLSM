@@ -60,7 +60,7 @@ class KVStore:
         if at is None:
             return versions[-1][1]
         else:
-            for i in range(len(versions), -1, -1):
+            for i in range(len(versions) - 1, -1, -1):
                 if versions[i][0] <= at:
                     return versions[i][1]
 
@@ -94,12 +94,11 @@ class KVStore:
                 line = line.strip()
                 if index_file:
                     inner_key, value = line.split(" ")
+                    value = int(value)
+                    tuples.append((inner_key, value))
                 else:
                     inner_key, seq, value = KVStore._parse_sstable_line(line)
                     tuples.append((inner_key, seq, value))
-                # The index files need the int_offset instead of just the string value.
-                value = int(value) if index_file else value
-                tuples.append((inner_key, value))
 
         return tuples
 
