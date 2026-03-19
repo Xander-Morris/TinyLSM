@@ -3,6 +3,7 @@ import os
 import src.config as config 
 import src.classes.bloom_filter as bloom_filter 
 import src.classes.manifest as manifest 
+import binascii
 
 class KVStore:
     # Static Methods
@@ -65,7 +66,9 @@ class KVStore:
                 max_key = key 
                 i += 1
                 offset = file.tell()
-                file.write(f"{key} {value}\n")
+                line = f"{key} {value}\n"
+                checksum = binascii.crc32(line.encode())
+                file.write(f"{line[:-1]} {checksum}\n")
                 
                 if i % config.SPARSE_INDEX_N == 0:
                     sparse.append((key, offset))
@@ -185,7 +188,14 @@ class KVStore:
         with open(file_name, 'r') as file:
             for line in file: 
                 line = line.strip() 
-                inner_key, value = line.split(" ")
+                inner_key, value = "", ""
+                if not index_file:
+                    inner_key, value, checksum = line.split(" ")
+                    computed_checksum = str(binascii.crc32(f"{inner_key} {value}".encode()))
+                    if checksum != computed_checksum:
+                        raise ValueError(f"The checksum of {checksum} does not match the computed checksum of {computed_checksum}!")
+                else:
+                    inner_key, value = line.split(" ")
                 # The index files need the int_offset instead of just the string value. 
                 value = int(value) if index_file else value 
                 tuples.append((inner_key, value))
