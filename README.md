@@ -71,7 +71,7 @@ The `stats()` method returns a snapshot of the store's current state:
 Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`. All versions are written to disk on flush, so snapshot reads work across SSTable boundaries too.
 
 ### Tombstones
-Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction and dropped at the end.
+Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction until cleanup is implemented.
 
 ### CRC Checksums
 Each SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and if it doesn't match a `ValueError` is raised right away instead of returning bad data.
@@ -93,4 +93,4 @@ Run with `python -m src.benchmark`. These results are from my personal Windows 1
 | Reads (4 threads)  | ~8,000  |
 | Misses             | ~18,000 |
 
-Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since I don't see a gain in performance past that point. The increase from 1 to 4 threads in performance is consistent, yet marginal. Past 4 threads, the GIL overhead outweighs the performance gains from parallelism for the I/O operations. 
+Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since performance stops improving past that point. The gain from 1 to 4 threads is real but modest — past 4, the GIL overhead starts eating into whatever parallelism the I/O would give you.
