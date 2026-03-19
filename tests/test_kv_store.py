@@ -97,3 +97,18 @@ def test_scan_delete_after_flush(store):
     store.delete("foo")
     result = store.scan("foo", "foo")
     assert result == []
+
+def test_stats(store):
+    setting1 = {"foo": "bar", "xander": "sadie"}
+    do_setting(store, setting1)
+    force_flush(store)
+    stats = store.stats()
+    assert stats["sstable_count"] > 0
+    assert stats["total_size_bytes"] > 0
+    assert 0 in stats["sstables_per_level"]  
+    assert stats["memtable_keys"] == 0        
+    assert stats["memtable_size_bytes"] == 0  
+    store.set("new_key", "new_value")
+    stats = store.stats()
+    assert stats["memtable_keys"] == 1
+    assert stats["memtable_size_bytes"] > 0
