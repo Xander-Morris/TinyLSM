@@ -88,12 +88,12 @@ class KVStore:
     # Object-Specific Methods 
     def __init__(self):
         self._store = {}
-        self.entries = 0
-        self.index_counter = 0
+        self._entries = 0
+        self._index_counter = 0
         self._wal_buffer_count = 0
-        self.bloom_filters = {}
-        self.sparse_indexes = {}
-        self.manifest = manifest.Manifest.load() 
+        self._bloom_filters = {}
+        self._sparse_indexes = {}
+        self._manifest = manifest.Manifest.load() 
         self._lock = read_write_lock.ReadWriteLock()
         self._load_sstables()
 
@@ -124,7 +124,7 @@ class KVStore:
 
     def _write_sstable(self, index, data):
         write_result = KVStore._write_to_sstable_file(index, data)
-        self.sparse_indexes[index] = write_result[0]
+        self._sparse_indexes[index] = write_result[0]
         self._write_bloom_filter(data, index)
 
         return write_result 
@@ -138,21 +138,21 @@ class KVStore:
         with open(f"sst_{index}.bloom", 'w') as file:
             file.write(filter.serialize())
 
-        self.bloom_filters[index] = filter 
+        self._bloom_filters[index] = filter 
 
     def _update_manifest(self, level, file_name, min_key, max_key):
-        self.manifest.add(level, file_name, min_key, max_key)
-        self.manifest.save()
+        self._manifest.add(level, file_name, min_key, max_key)
+        self._manifest.save()
 
     def _compact_level(self, level):
-        entries = [entry for entry in self.manifest.entries if entry["level"] == level]
+        entries = [entry for entry in self._manifest.entries if entry["level"] == level]
 
         if not entries:
             return
 
         overall_min = min(entry["min_key"] for entry in entries)
         overall_max = max(entry["max_key"] for entry in entries)
-        next_entries = [entry for entry in self.manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
+        next_entries = [entry for entry in self._manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
         merged = {}
 
         def read_from_entries_list(entries_list):
@@ -172,24 +172,24 @@ class KVStore:
             os.remove(f"sst_{index}")
             os.remove(f"sst_{index}.bloom")
             os.remove(f"sst_{index}.index")
-            self.manifest.remove(entry["file_name"])
-            self.bloom_filters.pop(index, None)
-            self.sparse_indexes.pop(index, None)
+            self._manifest.remove(entry["file_name"])
+            self._bloom_filters.pop(index, None)
+            self._sparse_indexes.pop(index, None)
 
         sstable_file_size = config.MAX_L0_FILES * (10 ** (level + 1))
 
         for i in range(0, len(merged), sstable_file_size):
             chunk = merged[i:i + sstable_file_size]
-            self.index_counter += 1
-            self._write_sstable(self.index_counter, chunk)
-            self._update_manifest(level + 1, f"sst_{self.index_counter}", chunk[0][0], chunk[-1][0])
+            self._index_counter += 1
+            self._write_sstable(self._index_counter, chunk)
+            self._update_manifest(level + 1, f"sst_{self._index_counter}", chunk[0][0], chunk[-1][0])
 
     def _compact(self):
         level = 0
 
         while True:
             self._compact_level(level)
-            next_count = sum(1 for entry in self.manifest.entries if entry["level"] == level + 1)
+            next_count = sum(1 for entry in self._manifest.entries if entry["level"] == level + 1)
             level_limit = config.MAX_L0_FILES * (10 ** (level + 1))
 
             if next_count < level_limit: 
@@ -198,24 +198,24 @@ class KVStore:
             level += 1
 
     def _flush(self):
-        self.index_counter += 1
+        self._index_counter += 1
         sorted_store = sorted(self._store.items())
-        write_result = self._write_sstable(self.index_counter, sorted_store)
-        self._update_manifest(0, f"sst_{self.index_counter}", write_result[1], write_result[2])
+        write_result = self._write_sstable(self._index_counter, sorted_store)
+        self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
         self._store = {}
-        self.entries = 0 
+        self._entries = 0 
         self._wal.flush()
         self._wal.close()
         self._wal = open(config.LOG_FILE_NAME, 'w')
         self._wal.close()
         self._wal = open(config.LOG_FILE_NAME, 'a')
-        l0_count = sum(1 for entry in self.manifest.entries if entry["level"] == 0)
+        l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
         
         if l0_count >= config.MAX_L0_FILES:
             self._compact()
 
     def _search_sstables(self, key):
-        sorted_entries = sorted(self.manifest.entries, 
+        sorted_entries = sorted(self._manifest.entries, 
             key=lambda entry: (0, -(KVStore._sst_index(entry))) if entry["level"] == 0 else (entry["level"], 0))
 
         for entry in sorted_entries:
@@ -224,10 +224,10 @@ class KVStore:
 
             index = KVStore._sst_index(entry)
 
-            if not self.bloom_filters[index].contains(key):
+            if not self._bloom_filters[index].contains(key):
                 continue 
                 
-            if self.sparse_indexes[index]: 
+            if self._sparse_indexes[index]: 
                 sparse_index_result = self._search_sstable_with_index(index, key)
 
                 if sparse_index_result == config.TOMBSTONE_VALUE:
@@ -250,24 +250,24 @@ class KVStore:
         return None 
     
     def _search_sstable_with_index(self, index, key):
-        if not self.sparse_indexes[index]:
+        if not self._sparse_indexes[index]:
             print(f"No sparse index exists in the sparse_indexes dictionary for {index}!")
             return
 
         low = 0
-        high = len(self.sparse_indexes[index]) - 1
+        high = len(self._sparse_indexes[index]) - 1
         found = False
 
         while low <= high:
             mid = (low + high) // 2
 
-            if self.sparse_indexes[index][mid][0] <= key: 
+            if self._sparse_indexes[index][mid][0] <= key: 
                 low = mid + 1 
                 found = True
             else:
                 high = mid - 1
         
-        offset = self.sparse_indexes[index][low - 1][1] if found else 0
+        offset = self._sparse_indexes[index][low - 1][1] if found else 0
 
         with open(f"sst_{index}", 'r') as file: 
             file.seek(offset)
@@ -300,30 +300,30 @@ class KVStore:
             try:
                 with open(f"sst_{index_counter}.bloom", 'r') as file: 
                     line = file.read() 
-                    self.bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(line)
+                    self._bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(line)
             except FileNotFoundError:
                 print(f"Bloom filter file does not exist for index {index_counter}!")
 
             try:
                 tuples = KVStore._build_sstable_tuples(index_counter, True)
-                self.sparse_indexes[index_counter] = tuples 
+                self._sparse_indexes[index_counter] = tuples 
             except FileNotFoundError:
                 print(f"Index file does not exist for index {index_counter}!")
 
-        self.index_counter = index_counter
-        self.entries = sum(len(k) + len(v) for k, v in self._store.items() if v != config.TOMBSTONE_VALUE and v is not None)
+        self._index_counter = index_counter
+        self._entries = sum(len(k) + len(v) for k, v in self._store.items() if v != config.TOMBSTONE_VALUE and v is not None)
 
     def _set(self, key: str, value: str):
         prev_value = self._store.get(key)
         self._store[key] = value
 
         if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
-            self.entries += len(key) + len(value)
+            self._entries += len(key) + len(value)
         else:
             # Overwriting a real value, so adjust by the difference in value length. 
-            self.entries += (len(value) - len(prev_value))
+            self._entries += (len(value) - len(prev_value))
 
-        if self.entries < config.MAX_MEMTABLE_SIZE:
+        if self._entries < config.MAX_MEMTABLE_SIZE:
             return
 
         # Do the flush. 
@@ -335,7 +335,7 @@ class KVStore:
 
         # I only want to subtract the entries count when it was a valid value to begin with.
         if prev_value is not None and prev_value != config.TOMBSTONE_VALUE:
-            self.entries -= (len(key) + len(prev_value))
+            self._entries -= (len(key) + len(prev_value))
 
     # Public Methods 
     def get(self, key: str):
@@ -353,7 +353,7 @@ class KVStore:
         with self._lock.read():
             entries = {}
 
-            for entry in self.manifest.entries:
+            for entry in self._manifest.entries:
                 index = KVStore._sst_index(entry)
                 tuples = KVStore._build_sstable_tuples(index)
 
