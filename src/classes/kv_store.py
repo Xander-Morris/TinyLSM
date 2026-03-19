@@ -10,6 +10,16 @@ class KVStore:
     @staticmethod 
     def _sst_index(entry):
         return int(entry["file_name"].split("_")[1])
+    
+    @staticmethod 
+    def _parse_sstable_line(line):
+        key, value, stored_checksum = line.split(" ")
+        computed_checksum = str(binascii.crc32(f"{key} {value}".encode()))
+
+        if stored_checksum != computed_checksum:
+            raise ValueError(f"Checksum mismatch for key '{key}': expected {computed_checksum}, got {stored_checksum}")
+
+        return key, value
 
     def __init__(self):
         self._store = {}
@@ -188,14 +198,10 @@ class KVStore:
         with open(file_name, 'r') as file:
             for line in file: 
                 line = line.strip() 
-                inner_key, value = "", ""
-                if not index_file:
-                    inner_key, value, checksum = line.split(" ")
-                    computed_checksum = str(binascii.crc32(f"{inner_key} {value}".encode()))
-                    if checksum != computed_checksum:
-                        raise ValueError(f"The checksum of {checksum} does not match the computed checksum of {computed_checksum}!")
-                else:
+                if index_file:
                     inner_key, value = line.split(" ")
+                else:
+                    inner_key, value = KVStore._parse_sstable_line(line)
                 # The index files need the int_offset instead of just the string value. 
                 value = int(value) if index_file else value 
                 tuples.append((inner_key, value))
@@ -261,9 +267,9 @@ class KVStore:
             file.seek(offset)
 
             for line in file: 
-                line = line.strip() 
-                inner_key, value = line.split(" ")
-                
+                line = line.strip()
+                inner_key, value = KVStore._parse_sstable_line(line)
+
                 if key == inner_key:
                     return value 
                 elif key < inner_key:
@@ -281,9 +287,9 @@ class KVStore:
 
             with open(file_name, 'r') as file:
                 for line in file: 
-                    line = line.strip() 
-                    key, value = line.split(" ")
-                    self._store[key] = value 
+                    line = line.strip()
+                    key, value = KVStore._parse_sstable_line(line)
+                    self._store[key] = value
             
             try:
                 with open(f"sst_{index_counter}.bloom", 'r') as file: 
