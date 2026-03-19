@@ -293,15 +293,18 @@ class KVStore:
 
     def _set(self, key: str, value: str):
         prev_value = self._store.get(key)
-        self._store[key] = value 
+        self._store[key] = value
 
-        if value is not None and prev_value is None:
+        if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
             self.entries += len(key) + len(value)
-        
-        if self.entries < config.MAX_MEMTABLE_SIZE:
-            return 
+        else:
+            # Overwriting a real value, so adjust by the difference in value length. 
+            self.entries += (len(value) - len(prev_value))
 
-        # Do the flush 
+        if self.entries < config.MAX_MEMTABLE_SIZE:
+            return
+
+        # Do the flush. 
         self._flush()
 
     def _delete(self, key: str):
