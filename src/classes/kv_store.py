@@ -91,6 +91,7 @@ class KVStore:
         self._entries = 0
         self._index_counter = 0
         self._wal_buffer_count = 0
+        self._seq = 0 
         self._bloom_filters = {}
         self._sparse_indexes = {}
         self._manifest = manifest.Manifest.load() 
@@ -295,7 +296,7 @@ class KVStore:
                 for line in file: 
                     line = line.strip()
                     key, value = KVStore._parse_sstable_line(line)
-                    self._store[key] = value
+                    self._set_key_seq_value(key, value)
             
             try:
                 with open(f"sst_{index_counter}.bloom", 'r') as file: 
@@ -313,9 +314,14 @@ class KVStore:
         self._index_counter = index_counter
         self._entries = sum(len(k) + len(v) for k, v in self._store.items() if v != config.TOMBSTONE_VALUE and v is not None)
 
+    def _set_key_seq_value(self, key: str, value: str):
+        if key not in self._store:
+            self._store[key] = []
+        self._store[key].append((self._seq, value))
+
     def _set(self, key: str, value: str):
         prev_value = self._store.get(key)
-        self._store[key] = value
+        self._set_key_seq_value(key, value)
 
         if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
             self._entries += len(key) + len(value)
@@ -331,7 +337,7 @@ class KVStore:
 
     def _delete(self, key: str):
         prev_value = self._store.get(key)
-        self._store[key] = config.TOMBSTONE_VALUE
+        self._set_key_seq_value(key, config.TOMBSTONE_VALUE)
 
         # I only want to subtract the entries count when it was a valid value to begin with.
         if prev_value is not None and prev_value != config.TOMBSTONE_VALUE:
