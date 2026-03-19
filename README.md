@@ -1,6 +1,6 @@
 # TinyLSM
 
-I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, and concurrent reads via a read-write lock.
+I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, and snapshot reads via MVCC.
 
 ## How to Run
 
