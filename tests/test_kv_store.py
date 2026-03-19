@@ -118,3 +118,12 @@ def test_sequence_behavior(store):
     assert store.get("foo") == "baz"
     assert store.get("foo", at=seq) == "bar"
     assert store.get("foo", at=seq - 1) == None
+
+def test_snapshot_after_flush(store):
+    store.set("foo", "bar")
+    seq = store._seq
+    store.set("foo", "baz")
+    force_flush(store)
+    assert store.get("foo") == "baz"
+    assert store.get("foo", at=seq) == "bar"
+    assert store.get("foo", at=seq - 1) == None

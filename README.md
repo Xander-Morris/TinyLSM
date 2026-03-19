@@ -68,7 +68,7 @@ The `stats()` method returns a snapshot of the store's current state:
 - `memtable_keys`: number of live keys currently in the memtable
 
 ### MVCC (Snapshot Reads)
-Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`. When the memtable is flushed, only the latest version of each key is written to disk.
+Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`. All versions are written to disk on flush, so snapshot reads work across SSTable boundaries too.
 
 ### Tombstones
 Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction and dropped at the end.
