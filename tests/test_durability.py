@@ -32,10 +32,17 @@ def test_manifest_corruption(store):
     assert store._manifest.entries == []
 
 def test_manifest_atomic_write(store):
-    store.set("xander", "garbage")
+    store.set("xander", "test")
     force_flush(store)
     
     with open("manifest.json", 'r') as file: 
         json.load(file) 
 
     assert not os.path.exists("manifest.tmp")
+
+def test_checksum_valid_after_restart(store):
+    store.set("xander", "test")
+    force_flush(store)
+    store.close() 
+    store = kv_store.KVStore() 
+    assert store.get("xander") == "test"
