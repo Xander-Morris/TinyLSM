@@ -20,7 +20,7 @@ class KVStore:
         if stored_checksum != computed_checksum:
             raise ValueError(f"Checksum mismatch for key '{key}': expected {computed_checksum}, got {stored_checksum}")
 
-        return key, value
+        return key, int(seq), value
 
     @staticmethod
     def _write_to_sstable_file(index, sorted_store):
@@ -428,6 +428,15 @@ class KVStore:
                             entries.pop(key, None)
                         else:
                             entries[key] = value
+
+            for key, versions in self._store.items():
+                if key >= start and key <= end:
+                    value = KVStore._pick_version(versions, at)
+
+                    if value == config.TOMBSTONE_VALUE:
+                        entries.pop(key, None)
+                    elif value is not None:
+                        entries[key] = value
 
             return [(key, entries[key]) for key in sorted(entries)]
         
