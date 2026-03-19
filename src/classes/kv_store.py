@@ -14,8 +14,8 @@ class KVStore:
 
     @staticmethod
     def _parse_sstable_line(line):
-        key, value, stored_checksum = line.split(" ")
-        computed_checksum = str(binascii.crc32(f"{key} {value}".encode()))
+        key, seq, value, stored_checksum = line.split(" ")
+        computed_checksum = str(binascii.crc32(f"{key} {seq} {value}".encode()))
 
         if stored_checksum != computed_checksum:
             raise ValueError(f"Checksum mismatch for key '{key}': expected {computed_checksum}, got {stored_checksum}")
@@ -420,14 +420,14 @@ class KVStore:
                         sstable_versions[key] = []
                     sstable_versions[key].append((seq, value))
 
-            for key, versions in sstable_versions.items():
-                if key >= start and key <= end:
-                    value = KVStore._pick_version(versions, at)
+                for key, versions in sstable_versions.items():
+                    if key >= start and key <= end:
+                        value = KVStore._pick_version(versions, at)
 
-                    if value == config.TOMBSTONE_VALUE:
-                        entries.pop(key, None)
-                    else:
-                        entries[key] = value
+                        if value == config.TOMBSTONE_VALUE:
+                            entries.pop(key, None)
+                        else:
+                            entries[key] = value
 
             return [(key, entries[key]) for key in sorted(entries)]
         
