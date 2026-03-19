@@ -3,7 +3,7 @@ import glob
 import json
 import os 
 import src.classes.kv_store as kv_store
-from conftest import force_flush, force_compaction, do_setting, assert_all_readable
+from conftest import force_flush
 
 def test_checksum_corruption(store):
     store.set("xander", "test")
