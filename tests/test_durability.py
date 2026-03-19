@@ -10,7 +10,10 @@ def test_checksum_corruption(store):
     with open(files[0], 'r') as file: 
         lines = file.readlines() 
     
-    lines[0] = lines[0][:5] + "X" + lines[0][6:]
+    for i, line in enumerate(lines):
+        if line.startswith("xander"):
+            lines[i] = lines[i][:5] + "X" + lines[i][6:]
+            break
 
     with open(files[0], 'w') as file: 
         file.writelines(lines)
