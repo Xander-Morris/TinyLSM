@@ -399,29 +399,28 @@ class KVStore:
                             raw_value = versions[i][1]
                             break
             else:
-                raw_value = self._search_sstables(key)
+                raw_value = self._search_sstables(key, at)
             
             return None if raw_value == config.TOMBSTONE_VALUE else raw_value
 
-    def scan(self, start: str, end: str):
+    def scan(self, start: str, end: str, at=None):
         with self._lock.read():
             entries = {}
 
             for entry in self._manifest.entries:
                 index = KVStore._sst_index(entry)
                 tuples = KVStore._build_sstable_tuples(index)
+                sstable_versions = {}
 
-                for key, value in tuples:
-                    if key >= start and key <= end:
-                        if value == config.TOMBSTONE_VALUE:
-                            entries.pop(key, None)
-                        else:
-                            entries[key] = value
+                for key, seq, value in tuples:
+                    if key not in sstable_versions:
+                        sstable_versions[key] = []
+                    sstable_versions[key].append((seq, value))
 
-            for key, versions in self._store.items():
-                value = versions[-1][1] # Use the latest value. 
-
+            for key, versions in sstable_versions.items():
                 if key >= start and key <= end:
+                    value = KVStore._pick_version(versions, at)
+                    
                     if value == config.TOMBSTONE_VALUE:
                         entries.pop(key, None)
                     else:
