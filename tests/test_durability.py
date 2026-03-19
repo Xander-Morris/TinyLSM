@@ -1,5 +1,6 @@
 import pytest 
 import glob 
+import src.classes.kv_store as kv_store
 from conftest import force_flush, force_compaction, do_setting, assert_all_readable
 
 def test_checksum_corruption(store):
@@ -20,3 +21,10 @@ def test_checksum_corruption(store):
 
     with pytest.raises(ValueError):
         store.get("xander")
+
+def test_manifest_corruption(store):
+    with open('manifest.json', 'w') as file: 
+        file.write("garbage corruption")
+    
+    store = kv_store.KVStore()
+    assert store != None 

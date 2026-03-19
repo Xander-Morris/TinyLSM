@@ -1,6 +1,6 @@
 import pytest 
 from conftest import force_flush, force_compaction, do_setting, assert_all_readable
-import src.classes.kv_store 
+import src.classes.kv_store as kv_store 
 
 def test_set_get(store):
     store.set("foo", "bar")
@@ -17,14 +17,14 @@ def test_tombstone_after_flush(store):
     store.delete("foo")
     force_flush(store)
     store.close()
-    store = src.classes.kv_store.KVStore() 
+    store = kv_store.KVStore() 
     assert store.get("foo") == None 
 
 def test_wal_replay(store):
     setting = {"foo": "bar", "xander": "sadie"}
     do_setting(store, setting)
     store.close()
-    store = src.classes.kv_store.KVStore()
+    store = kv_store.KVStore()
     assert_all_readable(store, setting)
 
 def test_sstable_read_after_flush(store):
