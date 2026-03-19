@@ -1,6 +1,6 @@
 # TinyLSM
 
-This is a project I've worked on while reading Designing Data-Intensive Applications to help me understand the concepts in the book better. This is an LSM-tree (Log-Structured Merge-tree) engine written in Python that uses SSTables, Bloom filters, level compaction, sparse indexing, and more. Writes are buffered in memory, while data integrity is preserved via the write-ahead log. Data is flushed to sorted files on disk (SSTables), which are organized into levels and merged through a compaction process to remove obsolete data and optimize read performance.
+This is a project I've worked on while reading Designing Data-Intensive Applications to help me understand the concepts in the book better. This is an LSM-tree (Log-Structured Merge-tree) engine written in Python that uses SSTables, Bloom filters, level compaction, sparse indexing, CRC checksums, atomic manifest writes, and a read-write lock for concurrent reads. Writes are buffered in memory, while data integrity is preserved via the write-ahead log. Data is flushed to sorted files on disk (SSTables), which are organized into levels and merged through a compaction process to remove obsolete data and optimize read performance.
 
 ## How to Run
 
@@ -34,7 +34,7 @@ HASH_FUNCTIONS=5                   # number of hash functions used by bloom filt
 SPARSE_INDEX_N=4                   # sample every Nth key for the sparse index
 WAL_BUFFER_SIZE=100                # number of writes before WAL is flushed to disk
 TOMBSTONE_VALUE="__TOMBSTONE__"
-BENCHMARK_N=10000                  # number of operations to run in the benchmark
+BENCHMARK_N=100000                 # number of operations to run in the benchmark
 ```
 
 ## Architecture
@@ -60,14 +60,24 @@ SSTables are organized into levels. L0 is where all flushes land and files here 
 ### Tombstones
 Deletes don't immediately remove data — they write a special tombstone marker. This is necessary because the key might exist in an older SSTable on disk. The tombstone propagates through compaction, at which point it's dropped entirely.
 
+### CRC Checksums
+Every SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and compared — if they don't match, a `ValueError` is raised immediately rather than silently returning corrupt data.
+
+### Atomic Manifest Writes
+The manifest is written to a temporary file first, then renamed into place with `os.replace`. This is atomic on both Windows and Linux, so a crash mid-save can never leave the manifest in a partially-written state.
+
+### Concurrent Reads
+A `ReadWriteLock` allows multiple `get` and `scan` calls to run in parallel while writes remain exclusive. SSTable reads involve file I/O, during which Python releases the GIL, so concurrent reads genuinely run in parallel.
+
 ## Benchmarks
 
-Run with `python -m src.benchmark`. Results on a Windows 11 machine with a 4KB memtable and N=10,000, which triggers real flushes and compactions on every run:
+Run with `python -m src.benchmark`. Results on a personal Windows 11 machine with a 4KB memtable and N=100,000, which triggers real flushes and compactions on every run:
 
-| Operation | Ops/sec |
-|-----------|---------|
-| Writes    | ~8,400  |
-| Reads     | ~8,900  |
-| Misses    | ~49,000 |
+| Operation          | Ops/sec |
+|--------------------|---------|
+| Writes             | ~4,000  |
+| Reads (1 thread)   | ~7,000  |
+| Reads (4 threads)  | ~8,000  |
+| Misses             | ~18,000 |
 
-Miss lookups are ~10x faster than reads — bloom filters eliminate file I/O entirely for keys that don't exist. The WAL uses a write buffer of 100 entries before flushing to disk, trading a small crash-recovery window for higher write throughput.
+Miss lookups are faster than reads because bloom filters eliminate file I/O entirely for keys that don't exist. Concurrent reads show a measurable throughput improvement over single-threaded reads since SSTable I/O releases the GIL. The WAL uses a write buffer of 100 entries before flushing to disk, trading a small crash-recovery window for higher write throughput.
