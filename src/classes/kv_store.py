@@ -254,7 +254,7 @@ class KVStore:
                 continue 
                 
             if self._sparse_indexes[index]: 
-                sparse_index_result = self._search_sstable_with_index(index, key)
+                sparse_index_result = self._search_sstable_with_index(index, key, at)
 
                 if sparse_index_result == config.TOMBSTONE_VALUE:
                     return None 
@@ -265,7 +265,7 @@ class KVStore:
                 continue
             else:
                 tuples = KVStore._build_sstable_tuples(index)
-                search_result = KVStore._binary_search(tuples, key)
+                search_result = KVStore._binary_search(tuples, key, at)
 
                 if search_result == config.TOMBSTONE_VALUE:
                     return None 
@@ -294,20 +294,23 @@ class KVStore:
                 high = mid - 1
         
         offset = self._sparse_indexes[index][low - 1][1] if found else 0
+        versions = []
 
         with open(f"sst_{index}", 'r') as file: 
             file.seek(offset)
 
             for line in file: 
                 line = line.strip()
-                inner_key, value = KVStore._parse_sstable_line(line)
+                inner_key, seq, value = KVStore._parse_sstable_line(line)
 
                 if key == inner_key:
-                    return value 
+                    versions.append((seq, value))
+                elif key < inner_key and versions:
+                    break
                 elif key < inner_key:
-                    break 
-
-        return None 
+                    break
+        
+        return KVStore._pick_version(versions, at) if versions else None
 
     def _load_sstables(self):
         sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
