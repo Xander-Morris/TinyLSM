@@ -386,5 +386,8 @@ class KVStore:
             self._delete(key)
 
     def close(self):
+        if self._wal.closed:
+            return
+
         self._wal.flush()
         self._wal.close()
