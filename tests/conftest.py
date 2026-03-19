@@ -9,6 +9,13 @@ def store(tmp_path):
     os.chdir(tmp_path)
     return kv_store.KVStore()
 
+@pytest.fixture 
+def store(tmp_path):
+    os.chdir(tmp_path)
+    s = kv_store.KVStore() 
+    yield s
+    s.close() 
+
 def force_flush(store, make_sure_after_normal_entries=False):
     bytes_written = 0
     i = 0
