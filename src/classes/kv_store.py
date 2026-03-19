@@ -66,7 +66,7 @@ class KVStore:
                 max_key = key 
                 i += 1
                 offset = file.tell()
-                line = f"{key} {value}\n"
+                line = f"{key} {value}"
                 checksum = binascii.crc32(line.encode())
                 file.write(f"{line[:-1]} {checksum}\n")
                 
