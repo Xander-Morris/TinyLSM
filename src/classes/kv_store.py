@@ -7,11 +7,11 @@ import binascii
 
 class KVStore:
     # Static Methods
-    @staticmethod 
+    @staticmethod
     def _sst_index(entry):
         return int(entry["file_name"].split("_")[1])
-    
-    @staticmethod 
+
+    @staticmethod
     def _parse_sstable_line(line):
         key, value, stored_checksum = line.split(" ")
         computed_checksum = str(binascii.crc32(f"{key} {value}".encode()))
@@ -21,6 +21,70 @@ class KVStore:
 
         return key, value
 
+    @staticmethod
+    def _write_to_sstable_file(index, sorted_store):
+        sparse = []
+        min_key, max_key = None, None
+
+        with open(f"sst_{index}", 'w') as file:
+            i = 0
+
+            for key, value in sorted_store:
+                if min_key is None:
+                    min_key = key
+                max_key = key
+                i += 1
+                offset = file.tell()
+                line = f"{key} {value}"
+                checksum = binascii.crc32(line.encode())
+                file.write(f"{line} {checksum}\n")
+
+                if i % config.SPARSE_INDEX_N == 0:
+                    sparse.append((key, offset))
+
+        with open(f"sst_{index}.index", 'w') as file:
+            for key, offset in sparse:
+                file.write(f"{key} {offset}\n")
+
+        return (sparse, min_key, max_key)
+
+    @staticmethod
+    def _binary_search(tuples, key):
+        low = 0
+        high = len(tuples) - 1
+
+        while low <= high:
+            mid = (low + high) // 2
+            key_at_mid = tuples[mid][0]
+
+            if key == key_at_mid:
+                return tuples[mid][1] # return value
+            elif key < key_at_mid:
+                high = mid - 1
+            else:
+                low = mid + 1
+
+        return None
+
+    @staticmethod
+    def _build_sstable_tuples(index, index_file=False):
+        tuples = []
+        file_name = f"sst_{index}.index" if index_file else f"sst_{index}"
+
+        with open(file_name, 'r') as file:
+            for line in file:
+                line = line.strip()
+                if index_file:
+                    inner_key, value = line.split(" ")
+                else:
+                    inner_key, value = KVStore._parse_sstable_line(line)
+                # The index files need the int_offset instead of just the string value.
+                value = int(value) if index_file else value
+                tuples.append((inner_key, value))
+
+        return tuples
+
+    # Object-Specific Methods 
     def __init__(self):
         self._store = {}
         self.entries = 0
@@ -57,37 +121,11 @@ class KVStore:
             self._store[sp[1]] = config.TOMBSTONE_VALUE
 
     def _write_sstable(self, index, data):
-        write_result = self._write_to_sstable_file(index, data)
+        write_result = KVStore._write_to_sstable_file(index, data)
         self.sparse_indexes[index] = write_result[0]
         self._write_bloom_filter(data, index)
 
         return write_result 
-
-    def _write_to_sstable_file(self, index, sorted_store):
-        sparse = []
-        min_key, max_key = None, None 
-
-        with open(f"sst_{index}", 'w') as file: 
-            i = 0
-
-            for key, value in sorted_store:
-                if min_key is None: 
-                    min_key = key  
-                max_key = key 
-                i += 1
-                offset = file.tell()
-                line = f"{key} {value}"
-                checksum = binascii.crc32(line.encode())
-                file.write(f"{line} {checksum}\n")
-                
-                if i % config.SPARSE_INDEX_N == 0:
-                    sparse.append((key, offset))
-
-        with open(f"sst_{index}.index", 'w') as file: 
-            for key, offset in sparse: 
-                file.write(f"{key} {offset}\n")
-
-        return (sparse, min_key, max_key) 
 
     def _write_bloom_filter(self, items, index):
         filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
@@ -119,7 +157,7 @@ class KVStore:
             for entry in entries_list:
                 index = KVStore._sst_index(entry)
 
-                for key, value in self._build_sstable_tuples(index):
+                for key, value in KVStore._build_sstable_tuples(index):
                     merged[key] = value
 
         read_from_entries_list(next_entries) 
@@ -174,40 +212,6 @@ class KVStore:
         if l0_count >= config.MAX_L0_FILES:
             self._compact()
 
-    def _binary_search(self, tuples, key):
-        low = 0
-        high = len(tuples) - 1
-
-        while low <= high: 
-            mid = (low + high) // 2
-            key_at_mid = tuples[mid][0]
-
-            if key == key_at_mid:
-                return tuples[mid][1] # return value 
-            elif key < key_at_mid:
-                high = mid - 1
-            else:
-                low = mid + 1
-
-        return None
-    
-    def _build_sstable_tuples(self, index, index_file=False):
-        tuples = []
-        file_name = f"sst_{index}.index" if index_file else f"sst_{index}"
-
-        with open(file_name, 'r') as file:
-            for line in file: 
-                line = line.strip() 
-                if index_file:
-                    inner_key, value = line.split(" ")
-                else:
-                    inner_key, value = KVStore._parse_sstable_line(line)
-                # The index files need the int_offset instead of just the string value. 
-                value = int(value) if index_file else value 
-                tuples.append((inner_key, value))
-
-        return tuples
-
     def _search_sstables(self, key):
         sorted_entries = sorted(self.manifest.entries, 
             key=lambda entry: (0, -(KVStore._sst_index(entry))) if entry["level"] == 0 else (entry["level"], 0))
@@ -232,8 +236,8 @@ class KVStore:
                 
                 continue
             else:
-                tuples = self._build_sstable_tuples(index)
-                search_result = self._binary_search(tuples, key)
+                tuples = KVStore._build_sstable_tuples(index)
+                search_result = KVStore._binary_search(tuples, key)
 
                 if search_result == config.TOMBSTONE_VALUE:
                     return None 
@@ -299,7 +303,7 @@ class KVStore:
                 print(f"Bloom filter file does not exist for index {index_counter}!")
 
             try:
-                tuples = self._build_sstable_tuples(index_counter, True)
+                tuples = KVStore._build_sstable_tuples(index_counter, True)
                 self.sparse_indexes[index_counter] = tuples 
             except FileNotFoundError:
                 print(f"Index file does not exist for index {index_counter}!")
@@ -361,7 +365,7 @@ class KVStore:
 
         for entry in self.manifest.entries:
             index = KVStore._sst_index(entry)
-            tuples = self._build_sstable_tuples(index)
+            tuples = KVStore._build_sstable_tuples(index)
 
             for key, value in tuples:
                 if key >= start and key <= end:
