@@ -315,12 +315,14 @@ class KVStore:
         self._entries = sum(len(k) + len(v) for k, v in self._store.items() if v != config.TOMBSTONE_VALUE and v is not None)
 
     def _set_key_seq_value(self, key: str, value: str):
+        self._seq += 1
         if key not in self._store:
             self._store[key] = []
         self._store[key].append((self._seq, value))
 
     def _set(self, key: str, value: str):
-        prev_value = self._store.get(key)
+        versions = self._store.get(key)
+        prev_value = versions[-1][1] if versions else None
         self._set_key_seq_value(key, value)
 
         if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
