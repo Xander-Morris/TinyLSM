@@ -68,7 +68,7 @@ class KVStore:
                 offset = file.tell()
                 line = f"{key} {value}"
                 checksum = binascii.crc32(line.encode())
-                file.write(f"{line[:-1]} {checksum}\n")
+                file.write(f"{line} {checksum}\n")
                 
                 if i % config.SPARSE_INDEX_N == 0:
                     sparse.append((key, offset))
