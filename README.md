@@ -1,6 +1,6 @@
 # TinyLSM
 
-A project I built while reading Designing Data-Intensive Applications. It's an LSM-tree (Log-Structured Merge-tree) storage engine written in Python, implementing SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, and concurrent reads via a read-write lock.
+I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, and concurrent reads via a read-write lock.
 
 ## How to Run
 
@@ -40,38 +40,38 @@ BENCHMARK_N=100000                 # number of operations to run in the benchmar
 ## Architecture
 
 ### Memtable
-Writes go into an in-memory dictionary first, which keeps writes fast with no disk I/O on the write path. Once the memtable exceeds `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
+Writes go into an in-memory dictionary first. No disk I/O on the write path, so writes are fast. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
 
 ### Write-Ahead Log (WAL)
-Every write is appended to the WAL and the memtable in sequence. WAL writes are buffered and flushed to disk every WAL_BUFFER_SIZE operations for throughput, with a full flush forced before any memtable is persisted to an SSTable. On startup, the log is replayed to rebuild any unflushed memtable state.
+Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup the log is replayed to recover any writes that hadn't been flushed yet.
 
 ### SSTables
-When the memtable is flushed, keys are sorted and written to a new file. These files are immutable and never modified after creation, only replaced during compaction. Because keys are sorted, lookups can use binary search rather than scanning the whole file.
+When the memtable flushes, keys are sorted and written to a new file. SSTables are immutable after creation and only get replaced during compaction. Sorted keys mean lookups can binary search instead of scanning the whole file.
 
 ### Bloom Filters
-Each SSTable has a corresponding bloom filter. Before searching an SSTable for a key, the bloom filter is checked first. If it says the key definitely isn't there, the file read is skipped entirely. This makes lookups for non-existent keys much cheaper as the number of SSTables grows.
+Each SSTable has a bloom filter. Before reading an SSTable for a key, the filter is checked first. If it says the key isn't there, the file read is skipped entirely. This makes misses cheap no matter how many SSTables exist.
 
 ### Sparse Index
-Each SSTable has a sparse index: a sampled list of keys and their byte offsets in the file, recorded every N entries. On lookup, the sparse index is binary searched to find the nearest offset and the file is seeked directly to that position, avoiding loading the entire SSTable into memory.
+Each SSTable has a sparse index: a sampled list of keys and their byte offsets, recorded every N entries. On lookup the sparse index is binary searched to find the closest offset, then the file is seeked directly to that point instead of reading from the start.
 
 ### Leveled Compaction
-SSTables are organized into levels. L0 is where all flushes land, and files there can have overlapping key ranges. When L0 hits `MAX_L0_FILES`, a compaction is triggered that merges all L0 files with any overlapping L1 files, producing new L1 files with non-overlapping key ranges. Each level is 10x larger than the previous, so if L1 exceeds its limit after a compaction the process cascades down to L2, and so on. A manifest file (`manifest.json`) tracks which SSTables exist, what level they belong to, and their key range.
+SSTables are organized into levels. All flushes land in L0, where files can have overlapping key ranges. When L0 hits `MAX_L0_FILES`, it compacts into L1 by merging with any overlapping L1 files. Each level is 10x larger than the last, so if L1 overflows the process cascades to L2, and so on. A manifest file (`manifest.json`) tracks each SSTable's level and key range.
 
 ### Tombstones
-Deletes don't immediately remove data. Instead they write a tombstone marker, which is necessary because the key might exist in an older SSTable on disk. The tombstone propagates through compaction, at which point it's dropped entirely.
+Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction and dropped at the end.
 
 ### CRC Checksums
-Every SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and compared. If they don't match, a `ValueError` is raised immediately rather than returning corrupt data silently.
+Each SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and if it doesn't match a `ValueError` is raised right away instead of returning bad data.
 
 ### Atomic Manifest Writes
-The manifest is written to a temporary file and then renamed into place with `os.replace`, which is atomic on both Windows and Linux. A crash mid-save can't leave the manifest in a partially-written state.
+The manifest is written to a temp file and renamed into place with `os.replace`, which is atomic on both Windows and Linux. A crash mid-write can't corrupt it.
 
 ### Concurrent Reads
-A read-write lock allows multiple `get` and `scan` calls to run in parallel while writes remain exclusive. SSTable reads involve file I/O, which causes Python to release the GIL, so concurrent reads can genuinely run in parallel.
+A read-write lock lets multiple `get` and `scan` calls run in parallel while writes stay exclusive. SSTable reads release the GIL during file I/O, so threads actually overlap on disk reads.
 
 ## Benchmarks
 
-Run with `python -m src.benchmark`. Results on a personal Windows 11 machine with a 4KB memtable and N=100,000, which triggers real flushes and compactions on every run:
+Run with `python -m src.benchmark`. Results on a personal Windows 11 machine with a 4KB memtable and N=100,000:
 
 | Operation          | Ops/sec |
 |--------------------|---------|
@@ -80,4 +80,4 @@ Run with `python -m src.benchmark`. Results on a personal Windows 11 machine wit
 | Reads (4 threads)  | ~8,000  |
 | Misses             | ~18,000 |
 
-Miss lookups are faster than hits because bloom filters skip the SSTable entirely for keys that don't exist. Concurrent reads are faster than single-threaded because SSTable file I/O releases the GIL, allowing threads to genuinely overlap. The WAL write buffer trades a small crash-recovery window for better write throughput.
+Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. 4 threads is the sweet spot for concurrent reads on this machine — beyond that, lock contention and GIL overhead cancel out the gains from parallelism. The WAL buffer trades a small crash-recovery window for better write throughput.
