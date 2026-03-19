@@ -188,9 +188,12 @@ class KVStore:
                         merged[key] = []
                     merged[key].append((seq, value))
 
+        for key in merged:
+            merged[key].sort(key=lambda x: x[0]) # Sort each key's versions by seq before compacting.
+
+        merged = sorted(merged.items())
         read_from_entries_list(next_entries) 
         read_from_entries_list(entries)
-        merged = sorted(merged.items())
 
         for entry in entries + next_entries: 
             # Remove all files used by the index 
@@ -420,7 +423,7 @@ class KVStore:
             for key, versions in sstable_versions.items():
                 if key >= start and key <= end:
                     value = KVStore._pick_version(versions, at)
-                    
+
                     if value == config.TOMBSTONE_VALUE:
                         entries.pop(key, None)
                     else:
