@@ -119,9 +119,9 @@ class KVStore:
         line = line.strip()
         sp = line.split(" ")
         if sp[0] == "SET":
-            self._store[sp[1]] = sp[2]
+            self._set_key_seq_value(sp[1], sp[2])
         elif sp[0] == "DELETE":
-            self._store[sp[1]] = config.TOMBSTONE_VALUE
+            self._set_key_seq_value(sp[1], config.TOMBSTONE_VALUE)
 
     def _write_sstable(self, index, data):
         write_result = KVStore._write_to_sstable_file(index, data)
