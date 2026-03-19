@@ -1,5 +1,7 @@
 import pytest 
 import glob 
+import json
+import os 
 import src.classes.kv_store as kv_store
 from conftest import force_flush, force_compaction, do_setting, assert_all_readable
 
@@ -28,3 +30,12 @@ def test_manifest_corruption(store):
     
     store = kv_store.KVStore()
     assert store._manifest.entries == []
+
+def test_manifest_atomic_write(store):
+    store.set("xander", "garbage")
+    force_flush(store)
+    
+    with open("manifest.json", 'r') as file: 
+        json.load(file) 
+
+    assert not os.path.exists("manifest.tmp")
