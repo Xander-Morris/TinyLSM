@@ -172,8 +172,10 @@ class KVStore:
             for entry in entries_list:
                 index = KVStore._sst_index(entry)
 
-                for key, value in KVStore._build_sstable_tuples(index):
-                    merged[key] = value
+                for key, seq, value in KVStore._build_sstable_tuples(index):
+                    if key not in merged:
+                        merged[key] = []
+                    merged[key].append((seq, value))
 
         read_from_entries_list(next_entries) 
         read_from_entries_list(entries)
