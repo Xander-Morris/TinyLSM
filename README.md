@@ -61,11 +61,11 @@ SSTables are organized into levels. All flushes land in L0, where files can have
 ### Stats API
 The `stats()` method returns a snapshot of the store's current state:
 
-- `sstable_count` — total number of SSTables across all levels
-- `sstables_per_level` — SSTable count broken down by level
-- `total_size_bytes` — total size of all SSTable files on disk
-- `memtable_size_bytes` — current memtable size in bytes
-- `memtable_keys` — number of live keys currently in the memtable
+- `sstable_count`: total number of SSTables across all levels
+- `sstables_per_level`: SSTable count broken down by level
+- `total_size_bytes`: total size of all SSTable files on disk
+- `memtable_size_bytes`: current memtable size in bytes
+- `memtable_keys`: number of live keys currently in the memtable
 
 ### Tombstones
 Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction and dropped at the end.
