@@ -392,7 +392,9 @@ class KVStore:
                         else:
                             entries[key] = value
 
-            for key, value in self._store.items():
+            for key, versions in self._store.items():
+                value = versions[-1][1] # Use the latest value. 
+
                 if key >= start and key <= end:
                     if value == config.TOMBSTONE_VALUE:
                         entries.pop(key, None)
