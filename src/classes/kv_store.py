@@ -3,6 +3,7 @@ import os
 import src.config as config 
 import src.classes.bloom_filter as bloom_filter 
 import src.classes.manifest as manifest 
+import src.classes.read_write_lock as read_write_lock
 import binascii
 
 class KVStore:
@@ -93,6 +94,7 @@ class KVStore:
         self.bloom_filters = {}
         self.sparse_indexes = {}
         self.manifest = manifest.Manifest.load() 
+        self._lock = read_write_lock.ReadWriteLock()
         self._load_sstables()
 
         try:
@@ -336,49 +338,53 @@ class KVStore:
             self.entries -= (len(key) + len(prev_value))
 
     # Public Methods 
-    def set(self, key: str, value: str):
-        self._wal.write(f"SET {key} {value}\n")
-        self._increment_wall_buffer_count()
-        self._set(key, value)
-
     def get(self, key: str):
-        raw_value = None
+        with self._lock.read():
+            raw_value = None
 
-        if key in self._store:
-            raw_value = self._store.get(key)
-        else:
-            raw_value = self._search_sstables(key)
-        
-        return None if raw_value == config.TOMBSTONE_VALUE else raw_value
-
-    def delete(self, key: str):
-        self._wal.write(f"DELETE {key}\n")
-        self._increment_wall_buffer_count()
-        self._delete(key)
-
-    def close(self):
-        self._wal.flush()
-        self._wal.close()
+            if key in self._store:
+                raw_value = self._store.get(key)
+            else:
+                raw_value = self._search_sstables(key)
+            
+            return None if raw_value == config.TOMBSTONE_VALUE else raw_value
 
     def scan(self, start: str, end: str):
-        entries = {}
+        with self._lock.read():
+            entries = {}
 
-        for entry in self.manifest.entries:
-            index = KVStore._sst_index(entry)
-            tuples = KVStore._build_sstable_tuples(index)
+            for entry in self.manifest.entries:
+                index = KVStore._sst_index(entry)
+                tuples = KVStore._build_sstable_tuples(index)
 
-            for key, value in tuples:
+                for key, value in tuples:
+                    if key >= start and key <= end:
+                        if value == config.TOMBSTONE_VALUE:
+                            entries.pop(key, None)
+                        else:
+                            entries[key] = value
+
+            for key, value in self._store.items():
                 if key >= start and key <= end:
                     if value == config.TOMBSTONE_VALUE:
                         entries.pop(key, None)
                     else:
                         entries[key] = value
 
-        for key, value in self._store.items():
-            if key >= start and key <= end:
-                if value == config.TOMBSTONE_VALUE:
-                    entries.pop(key, None)
-                else:
-                    entries[key] = value
+            return [(key, entries[key]) for key in sorted(entries)]
+        
+    def set(self, key: str, value: str):
+        with self._lock.write():
+            self._wal.write(f"SET {key} {value}\n")
+            self._increment_wall_buffer_count()
+            self._set(key, value)
 
-        return [(key, entries[key]) for key in sorted(entries)]
+    def delete(self, key: str):
+        with self._lock.write():
+            self._wal.write(f"DELETE {key}\n")
+            self._increment_wall_buffer_count()
+            self._delete(key)
+
+    def close(self):
+        self._wal.flush()
+        self._wal.close()
