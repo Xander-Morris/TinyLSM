@@ -26,6 +26,9 @@ def force_flush(store, make_sure_after_normal_entries=False):
         bytes_written += len(s) + len("bar_test")
         i += 1
 
+    if store._flush_thread is not None:
+        store._flush_thread.join()
+
 def force_compaction(store):
     bytes_written = 0
     i = 0
