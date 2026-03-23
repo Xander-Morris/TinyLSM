@@ -289,7 +289,7 @@ class KVStore:
         if l0_count >= config.MAX_L0_FILES:
             self._compact()
 
-        self._imm_memtable = {} 
+        self._imm_memtable = None  
         self._imm_entries = 0
 
     def _search_sstables(self, key, at=None):
