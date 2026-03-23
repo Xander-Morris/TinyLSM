@@ -105,6 +105,8 @@ class KVStore:
     # Object-Specific Methods 
     def __init__(self):
         self._store = {}
+        self._imm_memtable = None 
+        self.__imm_entries = 0
         self._entries = 0
         self._index_counter = 0
         self._wal_buffer_count = 0
@@ -241,6 +243,8 @@ class KVStore:
 
     def _flush(self):
         self._index_counter += 1
+        self._imm_memtable = self._store 
+        self._imm_entries = self._entries 
         sorted_store = sorted(self._store.items())
         write_result = self._write_sstable(self._index_counter, sorted_store)
         self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
