@@ -131,7 +131,7 @@ class KVStore:
     # Object-Specific Methods 
     def __init__(self):
         self._store = {}
-        self._imm_memtable = {} 
+        self._imm_memtable = None 
         self._imm_entries = 0
         self._entries = 0
         self._index_counter = 0
@@ -268,6 +268,9 @@ class KVStore:
             level += 1
 
     def _flush(self):
+        if self._imm_memtable is not None:
+            return 
+
         self._index_counter += 1
         self._imm_memtable = self._store 
         self._imm_entries = self._entries 
@@ -404,7 +407,18 @@ class KVStore:
     def _get_prev_value(self, key: str):
         versions = self._store.get(key)
 
-        return versions[-1][1] if versions else None
+        if versions:
+            return versions[-1][1]
+        
+        if self._imm_memtable is None:
+            return None 
+
+        versions = self._imm_memtable.get(key)
+
+        if versions:
+            return versions[-1][1]
+        
+        return None 
 
     def _set(self, key: str, value: str):
         prev_value = self._get_prev_value(key)
@@ -438,7 +452,7 @@ class KVStore:
 
             if key in self._store:
                 raw_value = KVStore._get_raw_value_from_table_at(self._store, key, at)
-            elif key in self._imm_memtable:
+            elif self._imm_memtable is not None and key in self._imm_memtable:
                 raw_value = KVStore._get_raw_value_from_table_at(self._imm_memtable, key, at)
             else:
                 raw_value = self._search_sstables(key, at)
@@ -461,7 +475,7 @@ class KVStore:
 
                 self._gather_entries_from_table_at(entries, sstable_versions, start, end, at)
 
-            self._gather_entries_from_table_at(entries, self._imm_memtable, start, end, at)
+            self._gather_entries_from_table_at(entries, self._imm_memtable or {}, start, end, at)
             self._gather_entries_from_table_at(entries, self._store, start, end, at)   
 
             return [(key, entries[key]) for key in sorted(entries)]
@@ -485,7 +499,7 @@ class KVStore:
                 total_disk_size += os.path.getsize(file_name)
 
             # The memtable size is next, which is just the entries variable.
-            memtable_size = self._entries 
+            memtable_size = self._entries + self._imm_entries
 
             # Number of live keys (not tombstones) in the memtable is next. 
             keys_num = sum([1 for _, versions in self._store.items() if versions[-1][1] != config.TOMBSTONE_VALUE and versions[-1][1] is not None])
