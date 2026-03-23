@@ -131,7 +131,7 @@ class KVStore:
     # Object-Specific Methods 
     def __init__(self):
         self._store = {}
-        self._imm_memtable = None 
+        self._imm_memtable = {} 
         self._imm_entries = 0
         self._entries = 0
         self._index_counter = 0
@@ -286,7 +286,7 @@ class KVStore:
         if l0_count >= config.MAX_L0_FILES:
             self._compact()
 
-        self._imm_memtable = None 
+        self._imm_memtable = {} 
         self._imm_entries = 0
 
     def _search_sstables(self, key, at=None):
