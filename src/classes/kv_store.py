@@ -475,7 +475,7 @@ class KVStore:
             memtable_size = self._entries 
 
             # Number of live keys (not tombstones) in the memtable is next. 
-            keys_num = sum([1 for key, value in self._store.items() if value != config.TOMBSTONE_VALUE and value is not None])
+            keys_num = sum([1 for _, versions in self._store.items() if versions[-1][1] != config.TOMBSTONE_VALUE and versions[-1][1] is not None])
 
             return {
                 "sstable_count": sstable_count, 
