@@ -93,4 +93,4 @@ Run with `python -m src.benchmark`. These results are from my personal Windows 1
 | Reads (4 threads)  | ~8,000  |
 | Misses             | ~18,000 |
 
-Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since performance stops improving past that point. The gain from 1 to 4 threads is real but modest — past 4, the GIL overhead starts eating into whatever parallelism the I/O would give you.
+Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since performance stops improving past that point. The gain from 1 to 4 threads is real but modest, past 4, the GIL overhead starts eating into whatever parallelism the I/O would give you.
