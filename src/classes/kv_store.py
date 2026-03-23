@@ -188,12 +188,25 @@ class KVStore:
                         merged[key] = []
                     merged[key].append((seq, value))
 
-        for key in merged:
-            merged[key].sort(key=lambda x: x[0]) # Sort each key's versions by seq before compacting.
-
-        read_from_entries_list(next_entries) 
+        read_from_entries_list(next_entries)
         read_from_entries_list(entries)
-        merged = sorted(merged.items())
+
+        for key in merged:
+            merged[key].sort(key=lambda x: x[0])
+            merged[key] = [merged[key][-1]]
+
+        surviving = {}
+        for key, versions in merged.items():
+            if versions[0][1] == config.TOMBSTONE_VALUE:
+                has_older = any(
+                    e["level"] < level and e["min_key"] <= key <= e["max_key"]
+                    for e in self._manifest.entries
+                )
+                if not has_older:
+                    continue
+            surviving[key] = versions
+
+        merged = sorted(surviving.items())
 
         for entry in entries + next_entries: 
             # Remove all files used by the index 
@@ -461,7 +474,7 @@ class KVStore:
             # The memtable size is next, which is just the entries variable.
             memtable_size = self._entries 
 
-            # Number of *live* keys (not tombstones) in the memtable is next. 
+            # Number of live keys (not tombstones) in the memtable is next. 
             keys_num = sum([1 for key, value in self._store.items() if value != config.TOMBSTONE_VALUE and value is not None])
 
             return {
