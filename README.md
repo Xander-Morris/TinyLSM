@@ -1,6 +1,6 @@
 # TinyLSM
 
-I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, and snapshot reads via MVCC.
+I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, snapshot reads via MVCC, and an immutable memtable for non-blocking flushes.
 
 ## How to Run
 
@@ -41,7 +41,7 @@ BENCHMARK_N=100000                 # number of operations to run in the benchmar
 ## Architecture
 
 ### Memtable
-Writes go into an in-memory dictionary first. Since there is no disk I/O on the write path, the writes are fairly quick. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets flushed to disk as an SSTable.
+Writes go into an in-memory dictionary first. Since there is no disk I/O on the write path, the writes are fairly quick. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets promoted to an immutable memtable and a fresh active memtable is opened immediately. The immutable memtable is then flushed to disk as an SSTable. Reads check the active memtable first, then the immutable memtable if one exists, then SSTables.
 
 ### Write-Ahead Log (WAL)
 Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup, the log is replayed to recover any writes that hadn't been flushed yet.
@@ -71,7 +71,7 @@ The `stats()` method returns a snapshot of the store's current state:
 Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`. All versions are written to disk on flush, so snapshot reads work across SSTable boundaries too.
 
 ### Tombstones
-Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. The tombstone gets carried through compaction until cleanup is implemented.
+Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. During compaction, tombstones are dropped once there are no files at a lower level that could have the original value. Old versions of a key are also dropped during compaction — only the latest version survives.
 
 ### CRC Checksums
 Each SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and if it doesn't match a `ValueError` is raised right away instead of returning bad data.

@@ -5,6 +5,7 @@ import src.classes.bloom_filter as bloom_filter
 import src.classes.manifest as manifest 
 import src.classes.read_write_lock as read_write_lock
 import binascii
+import threading 
 
 class KVStore:
     # Static Methods
@@ -139,6 +140,7 @@ class KVStore:
         self._seq = 0 
         self._bloom_filters = {}
         self._sparse_indexes = {}
+        self._flush_thread = None 
         self._manifest = manifest.Manifest.load() 
         self._lock = read_write_lock.ReadWriteLock()
         self._load_sstables()
@@ -269,28 +271,33 @@ class KVStore:
 
     def _flush(self):
         if self._imm_memtable is not None:
-            return 
+            self._flush_thread.join()
 
         self._index_counter += 1
         self._imm_memtable = self._store 
         self._imm_entries = self._entries 
         self._store = {} 
         self._entries = 0
-        sorted_store = sorted(self._imm_memtable.items())
-        write_result = self._write_sstable(self._index_counter, sorted_store)
-        self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
-        self._wal.flush()
-        self._wal.close()
-        self._wal = open(config.LOG_FILE_NAME, 'w')
-        self._wal.close()
-        self._wal = open(config.LOG_FILE_NAME, 'a')
-        l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
-        
-        if l0_count >= config.MAX_L0_FILES:
-            self._compact()
 
-        self._imm_memtable = None  
-        self._imm_entries = 0
+        def _threaded_funct():
+            sorted_store = sorted(self._imm_memtable.items())
+            write_result = self._write_sstable(self._index_counter, sorted_store)
+            self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
+            self._wal.flush()
+            self._wal.close()
+            self._wal = open(config.LOG_FILE_NAME, 'w')
+            self._wal.close()
+            self._wal = open(config.LOG_FILE_NAME, 'a')
+            l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
+            
+            if l0_count >= config.MAX_L0_FILES:
+                self._compact()
+
+            self._imm_memtable = None  
+            self._imm_entries = 0
+
+        self._flush_thread = threading.Thread(target=_threaded_funct)
+        self._flush_thread.start()
 
     def _search_sstables(self, key, at=None):
         sorted_entries = sorted(self._manifest.entries, 
@@ -529,6 +536,9 @@ class KVStore:
     def close(self):
         if self._wal.closed:
             return
+
+        if self._flush_thread is not None:
+            self._flush_thread.join()
 
         self._wal.flush()
         self._wal.close()
