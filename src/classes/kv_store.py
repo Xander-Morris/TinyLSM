@@ -101,12 +101,38 @@ class KVStore:
                     tuples.append((inner_key, seq, value))
 
         return tuples
+    
+    @staticmethod 
+    def _get_raw_value_from_table_at(entries, key: str, at=None):
+        versions = entries.get(key)
+        raw_value = versions[-1][1]
+        
+        if at is not None: 
+            raw_value = None 
+
+            for i in range(len(versions) - 1, -1, -1):
+                if versions[i][0] <= at:
+                    raw_value = versions[i][1]
+                    break
+
+        return raw_value
+    
+    @staticmethod 
+    def _gather_entries_from_table_at(entries, lst, start: str, end: str, at=None):
+        for key, versions in lst.items():
+            if key >= start and key <= end:
+                value = KVStore._pick_version(versions, at)
+
+                if value == config.TOMBSTONE_VALUE:
+                    entries.pop(key, None)
+                elif value is not None:
+                    entries[key] = value
 
     # Object-Specific Methods 
     def __init__(self):
         self._store = {}
         self._imm_memtable = None 
-        self.__imm_entries = 0
+        self._imm_entries = 0
         self._entries = 0
         self._index_counter = 0
         self._wal_buffer_count = 0
@@ -245,11 +271,11 @@ class KVStore:
         self._index_counter += 1
         self._imm_memtable = self._store 
         self._imm_entries = self._entries 
-        sorted_store = sorted(self._store.items())
+        self._store = {} 
+        self._entries = 0
+        sorted_store = sorted(self._imm_memtable.items())
         write_result = self._write_sstable(self._index_counter, sorted_store)
         self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
-        self._store = {}
-        self._entries = 0 
         self._wal.flush()
         self._wal.close()
         self._wal = open(config.LOG_FILE_NAME, 'w')
@@ -259,6 +285,9 @@ class KVStore:
         
         if l0_count >= config.MAX_L0_FILES:
             self._compact()
+
+        self._imm_memtable = None 
+        self._imm_entries = 0
 
     def _search_sstables(self, key, at=None):
         sorted_entries = sorted(self._manifest.entries, 
@@ -408,16 +437,9 @@ class KVStore:
             raw_value = None
 
             if key in self._store:
-                versions = self._store.get(key)
-                raw_value = versions[-1][1]
-                
-                if at is not None: 
-                    raw_value = None 
-
-                    for i in range(len(versions) - 1, -1, -1):
-                        if versions[i][0] <= at:
-                            raw_value = versions[i][1]
-                            break
+                raw_value = KVStore._get_raw_value_from_table_at(self._store, key, at)
+            elif key in self._imm_memtable:
+                raw_value = KVStore._get_raw_value_from_table_at(self._imm_memtable, key, at)
             else:
                 raw_value = self._search_sstables(key, at)
             
@@ -437,23 +459,10 @@ class KVStore:
                         sstable_versions[key] = []
                     sstable_versions[key].append((seq, value))
 
-                for key, versions in sstable_versions.items():
-                    if key >= start and key <= end:
-                        value = KVStore._pick_version(versions, at)
+                self._gather_entries_from_table_at(entries, sstable_versions, start, end, at)
 
-                        if value == config.TOMBSTONE_VALUE:
-                            entries.pop(key, None)
-                        else:
-                            entries[key] = value
-
-            for key, versions in self._store.items():
-                if key >= start and key <= end:
-                    value = KVStore._pick_version(versions, at)
-
-                    if value == config.TOMBSTONE_VALUE:
-                        entries.pop(key, None)
-                    elif value is not None:
-                        entries[key] = value
+            self._gather_entries_from_table_at(entries, self._imm_memtable, start, end, at)
+            self._gather_entries_from_table_at(entries, self._store, start, end, at)   
 
             return [(key, entries[key]) for key in sorted(entries)]
         
