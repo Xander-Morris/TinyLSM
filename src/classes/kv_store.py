@@ -271,30 +271,39 @@ class KVStore:
 
     def _flush(self):
         if self._imm_memtable is not None:
-            self._flush_thread.join()
+            return
 
         self._index_counter += 1
-        self._imm_memtable = self._store 
-        self._imm_entries = self._entries 
-        self._store = {} 
+        index = self._index_counter
+        self._imm_memtable = self._store
+        self._imm_entries = self._entries
+        self._store = {}
         self._entries = 0
+        self._wal.flush()
+        self._wal.close()
+        self._wal = open(config.LOG_FILE_NAME, 'w')
+        self._wal.close()
+        self._wal = open(config.LOG_FILE_NAME, 'a')
 
         def _threaded_funct():
             sorted_store = sorted(self._imm_memtable.items())
-            write_result = self._write_sstable(self._index_counter, sorted_store)
-            self._update_manifest(0, f"sst_{self._index_counter}", write_result[1], write_result[2])
-            self._wal.flush()
-            self._wal.close()
-            self._wal = open(config.LOG_FILE_NAME, 'w')
-            self._wal.close()
-            self._wal = open(config.LOG_FILE_NAME, 'a')
-            l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
-            
-            if l0_count >= config.MAX_L0_FILES:
-                self._compact()
+            write_result = KVStore._write_to_sstable_file(index, sorted_store)
 
-            self._imm_memtable = None  
-            self._imm_entries = 0
+            bf = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
+            for key, _ in sorted_store:
+                bf.add(key)
+            with open(f"sst_{index}.bloom", 'w') as file:
+                file.write(bf.serialize())
+
+            with self._lock.write():
+                self._sparse_indexes[index] = write_result[0]
+                self._bloom_filters[index] = bf
+                self._update_manifest(0, f"sst_{index}", write_result[1], write_result[2])
+                l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
+                if l0_count >= config.MAX_L0_FILES:
+                    self._compact()
+                self._imm_memtable = None
+                self._imm_entries = 0
 
         self._flush_thread = threading.Thread(target=_threaded_funct)
         self._flush_thread.start()
