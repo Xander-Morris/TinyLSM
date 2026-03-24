@@ -71,7 +71,7 @@ The `stats()` method returns a snapshot of the store's current state:
 Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`. All versions are written to disk on flush, so snapshot reads work across SSTable boundaries too.
 
 ### Tombstones
-Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. During compaction, tombstones are dropped once there are no files at a lower level that could have the original value. Old versions of a key are also dropped during compaction — only the latest version survives.
+Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. During compaction, tombstones are dropped once there are no files at a lower level that could have the original value. Old versions of a key are also dropped during compaction, only the latest version survives.
 
 ### CRC Checksums
 Each SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and if it doesn't match a `ValueError` is raised right away instead of returning bad data.
