@@ -301,6 +301,7 @@ class KVStore:
             with self._lock.write():
                 self._sparse_indexes[index] = write_result[0]
                 self._bloom_filters[index] = bf
+                self._bytes_written_disk += os.path.getsize(f"sst_{index}")
                 self._update_manifest(0, f"sst_{index}", write_result[1], write_result[2])
                 l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
                 if l0_count >= config.MAX_L0_FILES:
@@ -442,16 +443,17 @@ class KVStore:
     def _set(self, key: str, value: str):
         prev_value = self._get_prev_value(key)
         self._set_key_seq_value(key, value)
+        increment = len(key) + len(value)
 
         if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
-            increment = len(key) + len(value)
             self._entries += increment
-            self._bytes_written_user += increment
         else:
             # Overwriting a real value, so adjust by the difference in value length. 
             decrement = (len(value) - len(prev_value))
             self._entries += decrement
-            self._bytes_written_user += decrement
+
+        # I want to track the total bytes the user wrote, not the net bytes they wrote. 
+        self._bytes_written_user += increment
 
         if self._entries < config.MAX_MEMTABLE_SIZE:
             return
