@@ -375,8 +375,6 @@ class KVStore:
 
                 if key == inner_key:
                     versions.append((seq, value))
-                elif key < inner_key and versions:
-                    break
                 elif key < inner_key:
                     break
         
