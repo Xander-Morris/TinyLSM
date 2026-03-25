@@ -137,6 +137,8 @@ class KVStore:
         self._entries = 0
         self._index_counter = 0
         self._wal_buffer_count = 0
+        self._bytes_written_disk = 0
+        self._bytes_written_user = 0
         self._seq = 0 
         self._bloom_filters = {}
         self._sparse_indexes = {}
@@ -180,6 +182,7 @@ class KVStore:
         write_result = KVStore._write_to_sstable_file(index, data)
         self._sparse_indexes[index] = write_result[0]
         self._write_bloom_filter(data, index)
+        self._bytes_written_disk += os.path.getsize(f"sst_{index}")
 
         return write_result 
 
@@ -441,10 +444,14 @@ class KVStore:
         self._set_key_seq_value(key, value)
 
         if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
-            self._entries += len(key) + len(value)
+            increment = len(key) + len(value)
+            self._entries += increment
+            self._bytes_written_user += increment
         else:
             # Overwriting a real value, so adjust by the difference in value length. 
-            self._entries += (len(value) - len(prev_value))
+            decrement = (len(value) - len(prev_value))
+            self._entries += decrement
+            self._bytes_written_user += decrement
 
         if self._entries < config.MAX_MEMTABLE_SIZE:
             return
@@ -500,27 +507,22 @@ class KVStore:
         
     def stats(self):
         with self._lock.read():
-            # SSTable count per level is calculated first.
             mp = {}
 
             for entry in self._manifest.entries: 
                 mp[entry["level"]] = mp.get(entry["level"], 0) + 1
             
-            # The total SSTable count is next, which is just the length of the manifest entries list.
             sstable_count = len(self._manifest.entries)
-
-            # Total disk size is next.
             total_disk_size = 0
             sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
 
             for file_name in sst_file_names:
                 total_disk_size += os.path.getsize(file_name)
 
-            # The memtable size is next, which is just the entries variable.
             memtable_size = self._entries + self._imm_entries
-
-            # Number of live keys (not tombstones) in the memtable is next. 
             keys_num = sum([1 for _, versions in self._store.items() if versions[-1][1] != config.TOMBSTONE_VALUE and versions[-1][1] is not None])
+            bytes_written_disk = self._bytes_written_disk
+            write_amplification = self._bytes_written_disk / self._bytes_written_user if self._bytes_written_user != 0 else 0
 
             return {
                 "sstable_count": sstable_count, 
@@ -528,6 +530,8 @@ class KVStore:
                 "total_size_bytes": total_disk_size,
                 "memtable_size_bytes": memtable_size,
                 "memtable_keys": keys_num,
+                "bytes_written_disk": bytes_written_disk,
+                "write_amplification": write_amplification,
             }
         
     # Write Operations
