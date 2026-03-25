@@ -519,7 +519,6 @@ class KVStore:
 
             memtable_size = self._entries + self._imm_entries
             keys_num = sum([1 for _, versions in self._store.items() if versions[-1][1] != config.TOMBSTONE_VALUE and versions[-1][1] is not None])
-            bytes_written_disk = self._bytes_written_disk
             write_amplification = self._bytes_written_disk / self._bytes_written_user if self._bytes_written_user != 0 else 0
 
             return {
@@ -528,7 +527,7 @@ class KVStore:
                 "total_size_bytes": total_disk_size,
                 "memtable_size_bytes": memtable_size,
                 "memtable_keys": keys_num,
-                "bytes_written_disk": bytes_written_disk,
+                "bytes_written_disk": self._bytes_written_disk,
                 "write_amplification": write_amplification,
             }
         
