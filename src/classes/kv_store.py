@@ -29,7 +29,6 @@ class KVStore:
         min_key, max_key = None, None
 
         with open(f"sst_{index}", 'w') as file:
-            i = 0
             key_count = 0
 
             for key, versions in sorted_store:
@@ -40,7 +39,6 @@ class KVStore:
                     if min_key is None:
                         min_key = key
                     max_key = key
-                    i += 1
                     offset = file.tell()
                     line = f"{key} {seq} {value}"
                     checksum = binascii.crc32(line.encode())
