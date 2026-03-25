@@ -134,9 +134,8 @@ class KVStore:
     @staticmethod
     def _memtable_iter(table):
         for key, versions in sorted(table.items()):
-            seq, value = versions[-1]
-            # The logic here is the same as the comment I wrote above for the _sstable_iter method.
-            yield (key, seq, value)
+            for seq, value in versions:
+                yield (key, seq, value)
 
     # Object-Specific Methods 
     def __init__(self):
@@ -541,7 +540,8 @@ class KVStore:
                     best_value = value
 
             if seen_key is not None and best_value != config.TOMBSTONE_VALUE:
-                yield seen_key, best_value
+                if at is None or best_seq <= at:
+                    yield seen_key, best_value
         
     def stats(self):
         with self._lock.read():
