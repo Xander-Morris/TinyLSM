@@ -130,6 +130,12 @@ class KVStore:
                 """
                 yield (key, seq, value)
 
+    @staticmethod
+    def _memtable_iter(table):
+        for key, versions in sorted(table.items()):
+            seq, value = versions[-1]
+            yield (key, seq, value)
+
     # Object-Specific Methods 
     def __init__(self):
         self._store = {}
