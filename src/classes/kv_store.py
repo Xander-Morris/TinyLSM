@@ -104,17 +104,8 @@ class KVStore:
     @staticmethod 
     def _get_raw_value_from_table_at(entries, key: str, at=None):
         versions = entries.get(key)
-        raw_value = versions[-1][1]
         
-        if at is not None: 
-            raw_value = None 
-
-            for i in range(len(versions) - 1, -1, -1):
-                if versions[i][0] <= at:
-                    raw_value = versions[i][1]
-                    break
-
-        return raw_value
+        return KVStore._pick_version(versions, at)
     
     @staticmethod 
     def _gather_entries_from_table_at(entries, lst, start: str, end: str, at=None):
