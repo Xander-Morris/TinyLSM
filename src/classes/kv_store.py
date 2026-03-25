@@ -468,11 +468,13 @@ class KVStore:
 
             if key in self._store:
                 raw_value = KVStore._get_raw_value_from_table_at(self._store, key, at)
-            elif self._imm_memtable is not None and key in self._imm_memtable:
+
+            if raw_value is None and self._imm_memtable is not None and key in self._imm_memtable:
                 raw_value = KVStore._get_raw_value_from_table_at(self._imm_memtable, key, at)
-            else:
+
+            if raw_value is None:
                 raw_value = self._search_sstables(key, at)
-            
+
             return None if raw_value == config.TOMBSTONE_VALUE else raw_value
 
     def scan(self, start: str, end: str, at=None):
