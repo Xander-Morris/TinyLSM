@@ -134,6 +134,7 @@ class KVStore:
     def _memtable_iter(table):
         for key, versions in sorted(table.items()):
             seq, value = versions[-1]
+            # The logic here is the same as the comment I wrote above for the _sstable_iter method.
             yield (key, seq, value)
 
     # Object-Specific Methods 
