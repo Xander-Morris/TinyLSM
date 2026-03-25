@@ -86,11 +86,17 @@ A read-write lock lets multiple `get` and `scan` calls run in parallel while wri
 
 Run with `python -m src.benchmark`. These results are from my personal Windows 11 machine with a 4KB memtable and N=100,000:
 
-| Operation          | Ops/sec |
-|--------------------|---------|
-| Writes             | ~4,000  |
-| Reads (1 thread)   | ~7,000  |
-| Reads (4 threads)  | ~8,000  |
-| Misses             | ~18,000 |
+| Operation          | Ops/sec   |
+|--------------------|-----------|
+| Writes             | ~262,000  |
+| Reads (1 thread)   | ~407,000  |
+| Reads (4 threads)  | ~101,000  |
+| Misses             | ~94,000   |
 
-Misses are faster than hits because bloom filters skip the SSTable read entirely for keys that don't exist. I used 4 threads since performance stops improving past that point. The gain from 1 to 4 threads is real but modest, past 4, the GIL overhead starts eating into whatever parallelism the I/O would give you.
+Writes are fast because the background flush thread means a write just hits the WAL buffer and the memtable dict, then returns. Disk I/O happens in the background without blocking the caller.
+
+Reads are fast for the same reason. With writes that quick, most data is still in the memtable by the time reads run, so reads are mostly dictionary lookups.
+
+4-thread reads are actually slower than single-threaded here. When reads hit the memtable, the work is CPU-bound, not I/O-bound. Python's GIL forces threads to take turns on CPU work, so the switching overhead makes things worse. Multi-threading helps when threads block on disk I/O and can genuinely overlap. With memtable hits, they can't.
+
+Misses are slower than reads because each miss has to check the bloom filter for every SSTable on disk before confirming the key doesn't exist. A memtable hit returns immediately.
