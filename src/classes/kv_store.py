@@ -6,6 +6,7 @@ import src.classes.manifest as manifest
 import src.classes.read_write_lock as read_write_lock
 import binascii
 import threading 
+import heapq
 
 class KVStore:
     # Static Methods
@@ -512,6 +513,35 @@ class KVStore:
             self._gather_entries_from_table_at(entries, self._store, start, end, at)   
 
             return [(key, entries[key]) for key in sorted(entries)]
+    
+    def iter(self, start: str, end: str, at=None):
+        with self._lock.read():
+            sources = []
+            for entry in sorted(self._manifest.entries, key=lambda e: (e["level"], -KVStore._sst_index(e))):
+                sources.append(KVStore._sstable_iter(KVStore._sst_index(entry)))
+            if self._imm_memtable is not None:
+                sources.append(KVStore._memtable_iter(self._imm_memtable))
+            sources.append(KVStore._memtable_iter(self._store))
+
+            seen_key = None
+            best_seq = -1
+            best_value = None
+
+            for key, seq, value in heapq.merge(*sources):
+                if key < start or key > end:
+                    continue
+                if key != seen_key:
+                    if seen_key is not None and best_value != config.TOMBSTONE_VALUE:
+                        yield seen_key, best_value
+                    seen_key = key
+                    best_seq = seq
+                    best_value = value
+                elif seq > best_seq:
+                    best_seq = seq
+                    best_value = value
+
+            if seen_key is not None and best_value != config.TOMBSTONE_VALUE:
+                yield seen_key, best_value
         
     def stats(self):
         with self._lock.read():
