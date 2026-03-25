@@ -526,22 +526,24 @@ class KVStore:
             best_seq = -1
             best_value = None
 
+            def should_yield(val, seq):
+                return val != config.TOMBSTONE_VALUE and (at is None or seq <= at)
+
             for key, seq, value in heapq.merge(*sources):
                 if key < start or key > end:
                     continue
                 if key != seen_key:
-                    if seen_key is not None and best_value != config.TOMBSTONE_VALUE:
+                    if seen_key is not None and should_yield(best_value, best_seq):
                         yield seen_key, best_value
                     seen_key = key
                     best_seq = seq
                     best_value = value
-                elif seq > best_seq:
+                elif seq > best_seq and (at is None or seq <= at):
                     best_seq = seq
                     best_value = value
 
-            if seen_key is not None and best_value != config.TOMBSTONE_VALUE:
-                if at is None or best_seq <= at:
-                    yield seen_key, best_value
+            if seen_key is not None and should_yield(best_value, best_seq):
+                yield seen_key, best_value
         
     def stats(self):
         with self._lock.read():
