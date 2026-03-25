@@ -128,14 +128,6 @@ def test_snapshot_after_flush(store):
     assert store.get("foo", at=seq) == "bar"
     assert store.get("foo", at=seq - 1) == None
 
-def test_snapshot_after_flush(store):
-    store.set("foo", "bar")
-    seq1 = store._seq
-    force_flush(store)
-    store.set("foo", "baz")
-    assert store.get("foo", at=seq1) == "bar"
-    assert store.get("foo") == "baz"
-
 def test_scan_snapshot_after_flush(store):
     store.set("foo", "bar")
     seq1 = store._seq 
