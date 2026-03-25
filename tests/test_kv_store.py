@@ -144,3 +144,17 @@ def test_write_amplification(store):
     
     force_flush(store)
     assert store.stats()["write_amplification"] > 1.0
+
+def test_iter(store):
+    setting = {"foo": "bar", "xander": "sadie"}
+    do_setting(store, setting)
+    result = list(store.iter("foo", "xander"))
+    assert result == [("foo", "bar"), ("xander", "sadie")]
+
+def test_iter_snapshot_after_flush(store):
+    store.set("foo", "bar")
+    seq1 = store._seq
+    force_flush(store)
+    store.set("foo", "baz")
+    assert list(store.iter("foo", "foo", at=seq1)) == [("foo", "bar")]
+    assert list(store.iter("foo", "foo")) == [("foo", "baz")]
