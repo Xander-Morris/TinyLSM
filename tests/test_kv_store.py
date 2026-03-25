@@ -135,3 +135,12 @@ def test_scan_snapshot_after_flush(store):
     store.set("foo", "baz")
     assert store.scan("foo", "foo", at=seq1) == [('foo', 'bar')]
     assert store.scan("foo", "foo") == [('foo', 'baz')]
+
+def test_write_amplification(store):
+    n = 10 
+    
+    for i in range(n):
+        store.set(f"{i}", f"{i}")
+    
+    force_flush(store)
+    assert store.stats()["write_amplification"] > 1.0
