@@ -45,11 +45,22 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     elif operation == "delete":
         store.delete(key)
 
+    successes = 1  # The leader itself counts as 1.
+    total_nodes = len(cluster_config.NODES)
+    majority = (total_nodes // 2) + 1
+
     for node_url in cluster_config.NODES:
         if node_url != my_url:
-            requests.post(f"{node_url}/replicate", json={"operation": operation, **json_tbl})
-    
-    return {"ok": True}
+            try:
+                requests.post(f"{node_url}/replicate", json={"operation": operation, **json_tbl}, timeout=1)
+                successes += 1
+            except Exception:
+                pass
+
+    if successes >= majority:
+        return {"ok": True}
+    else:
+        return {"ok": False, "error": "failed to reach majority"}
 
 @app.get("/get")
 def get(key: str):
