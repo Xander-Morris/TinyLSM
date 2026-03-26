@@ -3,12 +3,15 @@ import os
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
+import src.cluster.config as cluster_config 
+import requests 
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
 
 app = FastAPI()
 store = None 
+port = None
 
 class SetRequest(BaseModel):
     key: str
@@ -29,7 +32,19 @@ def get(key: str):
 
 @app.post("/set")
 def set(req: SetRequest):
+    my_url = f"http://localhost:{port}"
+
+    if my_url != cluster_config.LEADER:
+        # Forward it to the leader if this node is not the leader.
+        response = requests.post(f"{cluster_config.LEADER}/set", json={"key": req.key, "value": req.value})
+        return response.json()
+
     store.set(req.key, req.value)
+
+    for node_url in cluster_config.NODES:
+        if node_url != my_url:
+            requests.post(f"{node_url}/replicate", json={"operation": "set", "key": req.key, "value": req.value})
+
     return {"ok": True}
 
 @app.post("/delete")
@@ -43,7 +58,7 @@ def replicate(req: ReplicateRequest):
         store.set(req.key, req.value)
     elif req.operation == "delete":
         store.delete(req.key)
-        
+
     return {"ok": True}
 
 if __name__ == "__main__":
