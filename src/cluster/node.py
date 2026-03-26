@@ -13,6 +13,7 @@ import src.classes.kv_store as kv_store
 app = FastAPI()
 store = None 
 port = None
+my_url = None
 log = []  # list of {"index": int, "operation": str, "key": str, "value": str}
 log_index = 0
 
@@ -32,7 +33,6 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     if operation != "set" and operation != "delete":
         return {"ok": False}
     
-    my_url = f"http://localhost:{port}"
     json_tbl = {"key": key}
     if operation == "set":
         json_tbl["value"] = value
@@ -46,6 +46,10 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
         store.set(key, value)
     elif operation == "delete":
         store.delete(key)
+
+    global log_index
+    log_index += 1
+    log.append({"index": log_index, "operation": operation, "key": key, "value": value})
 
     successes = 1  # The leader itself counts as 1.
     total_nodes = len(cluster_config.NODES)
@@ -96,4 +100,18 @@ if __name__ == "__main__":
     os.makedirs(data_dir, exist_ok=True)
     os.chdir(data_dir)
     store = kv_store.KVStore()
+    my_url = f"http://localhost:{port}"
+
+    if my_url != cluster_config.LEADER:
+        try:
+            response = requests.get(f"{cluster_config.LEADER}/sync", params={"from_index": 0})
+            
+            for entry in response.json()["entries"]:
+                if entry["operation"] == "set":
+                    store.set(entry["key"], entry["value"])
+                elif entry["operation"] == "delete":
+                    store.delete(entry["key"])
+        except Exception:
+            pass
+
     uvicorn.run(app, host="0.0.0.0", port=port)
