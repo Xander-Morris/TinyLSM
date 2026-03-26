@@ -9,19 +9,21 @@ import os
 def cluster(tmp_path_factory):
     procs = []
     ports = [8100, 8101, 8102]
+    leader = f"http://localhost:{ports[0]}"
+    nodes = ",".join(f"http://localhost:{p}" for p in ports)
 
     for port in ports:
         data_dir = tmp_path_factory.mktemp(f"node_{port}")
         proc = subprocess.Popen(
-            [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir)],
+            [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader, nodes],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         procs.append(proc)
 
-    time.sleep(1.5)  # wait for nodes to start
+    time.sleep(1.5)
     yield ports
-    
+
     for proc in procs:
         proc.terminate()
         proc.wait()
