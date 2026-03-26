@@ -30,7 +30,7 @@ class ReplicateRequest(BaseModel):
     key: str 
     value: str = None 
 
-def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None):
+def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None = None):
     if operation != "set" and operation != "delete":
         return {"ok": False}
     
