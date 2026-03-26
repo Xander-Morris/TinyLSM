@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import src.cluster.config as cluster_config 
 import requests 
+from typing import Literal
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
@@ -25,7 +26,7 @@ class ReplicateRequest(BaseModel):
     key: str 
     value: str = None 
 
-def do_replicated_operation(operation: "set" | "delete", key: str, value: str | None):
+def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None):
     if operation != "set" and operation != "delete":
         return {"ok": False}
     
