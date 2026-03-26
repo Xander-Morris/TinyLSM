@@ -17,6 +17,11 @@ class SetRequest(BaseModel):
 class DeleteRequest(BaseModel):
     key: str
 
+class ReplicateRequest(BaseModel):
+    operation: str # "set" or "delete"
+    key: str 
+    value: str = None 
+
 @app.get("/get")
 def get(key: str):
     value = store.get(key)
@@ -30,6 +35,15 @@ def set(req: SetRequest):
 @app.post("/delete")
 def delete(req: DeleteRequest):
     store.delete(req.key)
+    return {"ok": True}
+
+@app.post("/replicate")
+def replicate(req: ReplicateRequest):
+    if req.operation == "set":
+        store.set(req.key, req.value)
+    elif req.operation == "delete":
+        store.delete(req.key)
+        
     return {"ok": True}
 
 if __name__ == "__main__":
