@@ -36,7 +36,7 @@ def do_replicated_operation(operation: "set" | "delete", key: str, value: str | 
 
     if my_url != cluster_config.LEADER:
         # Forward it to the leader if this node is not the leader.
-        response = requests.post(f"{cluster_config.LEADER}/set", json=json_tbl)
+        response = requests.post(f"{cluster_config.LEADER}/{operation}", json=json_tbl)
         return response.json()
 
     if operation == "set":
