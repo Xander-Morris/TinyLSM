@@ -13,6 +13,8 @@ import src.classes.kv_store as kv_store
 app = FastAPI()
 store = None 
 port = None
+log = []  # list of {"index": int, "operation": str, "key": str, "value": str}
+log_index = 0
 
 class SetRequest(BaseModel):
     key: str
@@ -66,6 +68,10 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
 def get(key: str):
     value = store.get(key)
     return {"key": key, "value": value}
+
+@app.get("/sync")
+def sync(from_index: int):
+    return {"entries": log[from_index:]}
 
 @app.post("/set")
 def set(req: SetRequest):
