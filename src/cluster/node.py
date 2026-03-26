@@ -3,7 +3,6 @@ import os
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
-import src.cluster.config as cluster_config 
 import requests 
 from typing import Literal
 
@@ -11,6 +10,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
 
 app = FastAPI()
+LEADER = None
+NODES = []
 store = None 
 port = None
 my_url = None
@@ -37,9 +38,9 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     if operation == "set":
         json_tbl["value"] = value
 
-    if my_url != cluster_config.LEADER:
+    if my_url != LEADER:
         # Forward it to the leader if this node is not the leader.
-        response = requests.post(f"{cluster_config.LEADER}/{operation}", json=json_tbl)
+        response = requests.post(f"{LEADER}/{operation}", json=json_tbl)
         return response.json()
 
     if operation == "set":
@@ -52,10 +53,10 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     log.append({"index": log_index, "operation": operation, "key": key, "value": value})
 
     successes = 1  # The leader itself counts as 1.
-    total_nodes = len(cluster_config.NODES)
+    total_nodes = len(NODES)
     majority = (total_nodes // 2) + 1
 
-    for node_url in cluster_config.NODES:
+    for node_url in NODES:
         if node_url != my_url:
             try:
                 requests.post(f"{node_url}/replicate", json={"operation": operation, **json_tbl}, timeout=1)
@@ -97,14 +98,22 @@ def replicate(req: ReplicateRequest):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
     data_dir = sys.argv[2] if len(sys.argv) > 2 else f"node_data_{port}"
+    leader = sys.argv[3] if len(sys.argv) > 3 else "http://localhost:8000"
+    nodes = sys.argv[4].split(",") if len(sys.argv) > 4 else [
+        "http://localhost:8000",
+        "http://localhost:8001", 
+        "http://localhost:8002",
+    ]
+    LEADER = leader
+    NODES = nodes
     os.makedirs(data_dir, exist_ok=True)
     os.chdir(data_dir)
     store = kv_store.KVStore()
     my_url = f"http://localhost:{port}"
 
-    if my_url != cluster_config.LEADER:
+    if my_url != LEADER:
         try:
-            response = requests.get(f"{cluster_config.LEADER}/sync", params={"from_index": 0})
+            response = requests.get(f"{LEADER}/sync", params={"from_index": 0})
 
             for entry in response.json()["entries"]:
                 if entry["operation"] == "set":
