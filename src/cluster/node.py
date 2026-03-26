@@ -25,6 +25,31 @@ class ReplicateRequest(BaseModel):
     key: str 
     value: str = None 
 
+def do_replicated_operation(operation: "set" | "delete", key: str, value: str | None):
+    if operation != "set" and operation != "delete":
+        return {"ok": False}
+    
+    my_url = f"http://localhost:{port}"
+    json_tbl = {"key": key}
+    if operation == "set":
+        json_tbl["value"] = value
+
+    if my_url != cluster_config.LEADER:
+        # Forward it to the leader if this node is not the leader.
+        response = requests.post(f"{cluster_config.LEADER}/set", json=json_tbl)
+        return response.json()
+
+    if operation == "set":
+        store.set(key, value)
+    elif operation == "delete":
+        store.delete(key)
+
+    for node_url in cluster_config.NODES:
+        if node_url != my_url:
+            requests.post(f"{node_url}/replicate", json={"operation": operation, **json_tbl})
+    
+    return {"ok": True}
+
 @app.get("/get")
 def get(key: str):
     value = store.get(key)
@@ -32,25 +57,11 @@ def get(key: str):
 
 @app.post("/set")
 def set(req: SetRequest):
-    my_url = f"http://localhost:{port}"
-
-    if my_url != cluster_config.LEADER:
-        # Forward it to the leader if this node is not the leader.
-        response = requests.post(f"{cluster_config.LEADER}/set", json={"key": req.key, "value": req.value})
-        return response.json()
-
-    store.set(req.key, req.value)
-
-    for node_url in cluster_config.NODES:
-        if node_url != my_url:
-            requests.post(f"{node_url}/replicate", json={"operation": "set", "key": req.key, "value": req.value})
-
-    return {"ok": True}
+    return do_replicated_operation("set", req.key, req.value)
 
 @app.post("/delete")
 def delete(req: DeleteRequest):
-    store.delete(req.key)
-    return {"ok": True}
+    return do_replicated_operation("delete", req.key)
 
 @app.post("/replicate")
 def replicate(req: ReplicateRequest):
