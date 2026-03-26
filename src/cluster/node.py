@@ -34,4 +34,7 @@ def delete(req: DeleteRequest):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    data_dir = f"node_data_{port}"
+    os.makedirs(data_dir, exist_ok=True)
+    os.chdir(data_dir)
     uvicorn.run(app, host="0.0.0.0", port=port)
