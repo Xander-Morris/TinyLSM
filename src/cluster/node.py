@@ -96,7 +96,7 @@ def replicate(req: ReplicateRequest):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
-    data_dir = f"node_data_{port}"
+    data_dir = sys.argv[2] if len(sys.argv) > 2 else f"node_data_{port}"
     os.makedirs(data_dir, exist_ok=True)
     os.chdir(data_dir)
     store = kv_store.KVStore()
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     if my_url != cluster_config.LEADER:
         try:
             response = requests.get(f"{cluster_config.LEADER}/sync", params={"from_index": 0})
-            
+
             for entry in response.json()["entries"]:
                 if entry["operation"] == "set":
                     store.set(entry["key"], entry["value"])
