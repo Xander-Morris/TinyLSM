@@ -15,7 +15,7 @@ NODES = []
 store = None 
 port = None
 my_url = None
-log = []  # list of {"index": int, "operation": str, "key": str, "value": str}
+log = []  # List containing elements with {"index": int, "operation": str, "key": str, "value": str}.
 log_index = 0
 
 class SetRequest(BaseModel):
