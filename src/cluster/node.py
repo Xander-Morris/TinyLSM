@@ -8,7 +8,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
 
 app = FastAPI()
-store = kv_store.KVStore()
+store = None 
 
 class SetRequest(BaseModel):
     key: str
@@ -37,4 +37,5 @@ if __name__ == "__main__":
     data_dir = f"node_data_{port}"
     os.makedirs(data_dir, exist_ok=True)
     os.chdir(data_dir)
+    store = kv_store.KVStore()
     uvicorn.run(app, host="0.0.0.0", port=port)
