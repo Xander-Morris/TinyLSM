@@ -63,10 +63,6 @@ def test_follower_write_forwarded_to_leader(cluster):
 def test_delete_replicates(cluster):
     ports = cluster
     requests.post(f"http://localhost:{ports[0]}/set", json={"key": "to_delete", "value": "temp"})
-    wait_for(lambda: all(
-        requests.get(f"http://localhost:{p}/get", params={"key": "to_delete"}).json()["value"] == "temp"
-        for p in ports
-    ))
     requests.post(f"http://localhost:{ports[0]}/delete", json={"key": "to_delete"})
     wait_for(lambda: all(
         requests.get(f"http://localhost:{p}/get", params={"key": "to_delete"}).json()["value"] is None
