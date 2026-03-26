@@ -1,22 +1,42 @@
 import sys
 import os
+import json
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
-import requests 
+import requests
 from typing import Literal
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
 
+REPLICATION_LOG_FILE = "replication.log"
+
 app = FastAPI()
 LEADER = None
 NODES = []
-store = None 
+store = None
 port = None
 my_url = None
 log = []  # List containing elements with {"index": int, "operation": str, "key": str, "value": str}.
 log_index = 0
+
+def _append_log_entry(entry):
+    with open(REPLICATION_LOG_FILE, 'a') as f:
+        f.write(json.dumps(entry) + '\n')
+
+def _load_log_from_disk():
+    global log, log_index
+    try:
+        with open(REPLICATION_LOG_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    entry = json.loads(line)
+                    log.append(entry)
+                    log_index = entry["index"]
+    except FileNotFoundError:
+        pass
 
 class SetRequest(BaseModel):
     key: str
@@ -50,7 +70,9 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
 
     global log_index
     log_index += 1
-    log.append({"index": log_index, "operation": operation, "key": key, "value": value})
+    entry = {"index": log_index, "operation": operation, "key": key, "value": value}
+    log.append(entry)
+    _append_log_entry(entry)
 
     successes = 1  # The leader itself counts as 1.
     total_nodes = len(NODES)
@@ -110,6 +132,9 @@ if __name__ == "__main__":
     os.chdir(data_dir)
     store = kv_store.KVStore()
     my_url = f"http://localhost:{port}"
+
+    if my_url == LEADER:
+        _load_log_from_disk()
 
     if my_url != LEADER:
         try:

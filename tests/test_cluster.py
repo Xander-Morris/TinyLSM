@@ -96,3 +96,47 @@ def test_catchup_after_restart(cluster, tmp_path_factory):
     assert requests.get(f"http://localhost:{port}/get", params={"key": "missed_write"}).json()["value"] == "2"
     proc.terminate()
     proc.wait()
+
+def test_replication_log_survives_leader_restart(tmp_path_factory):
+    port = 8200
+    url = f"http://localhost:{port}"
+    data_dir = tmp_path_factory.mktemp("persist_leader")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}).status_code == 200)
+    requests.post(f"{url}/set", json={"key": "alpha", "value": "1"})
+    requests.post(f"{url}/set", json={"key": "beta", "value": "2"})
+
+    proc.terminate()
+    proc.wait()
+
+    proc2 = subprocess.Popen(
+        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}).status_code == 200)
+
+    follower_port = 8201
+    follower_url = f"http://localhost:{follower_port}"
+    follower_dir = tmp_path_factory.mktemp("persist_follower")
+    follower_nodes = f"{url},{follower_url}"
+
+    follower_proc = subprocess.Popen(
+        [sys.executable, "-m", "src.cluster.node", str(follower_port), str(follower_dir), url, follower_nodes],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    wait_for(lambda: requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1", timeout=5.0)
+    assert requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1"
+    assert requests.get(f"{follower_url}/get", params={"key": "beta"}).json()["value"] == "2"
+
+    proc2.terminate()
+    proc2.wait()
+    follower_proc.terminate()
+    follower_proc.wait()
