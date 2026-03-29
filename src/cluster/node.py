@@ -44,6 +44,18 @@ def _load_log_from_disk():
     except FileNotFoundError:
         pass
 
+def _start_election():
+    term += 1
+    voted_for = my_url 
+    votes = 1 
+
+    for node_url in NODES:
+        if node_url != my_url:
+            try:
+                requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": term}, timeout=1)
+            except Exception:
+                pass
+
 class SetRequest(BaseModel):
     key: str
     value: str
@@ -55,6 +67,10 @@ class ReplicateRequest(BaseModel):
     operation: str # "set" or "delete"
     key: str 
     value: str = None 
+
+class VoteRequest(BaseModel):
+    candidate_url: str
+    term: int 
 
 def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None = None):
     if operation != "set" and operation != "delete":
@@ -130,6 +146,16 @@ def replicate(req: ReplicateRequest):
 
     return {"ok": True}
 
+@app.post("/vote")
+def vote(req: VoteRequest):
+    if req.term > term or voted_for is None or voted_for == req.candidate_url:
+        term = req.term 
+        voted_for = req.candidate_url 
+        global last_heartbeat
+        last_heartbeat = time.time() 
+
+        return {"vote_granted": True} 
+
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
     data_dir = sys.argv[2] if len(sys.argv) > 2 else f"node_data_{port}"
@@ -173,9 +199,6 @@ if __name__ == "__main__":
             pass
 
         ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
-
-        def _start_election():
-            pass 
 
         def _election_timeout_watcher():
             while True: 
