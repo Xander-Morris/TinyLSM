@@ -7,6 +7,7 @@ from pydantic import BaseModel
 import requests
 from typing import Literal
 import time 
+import threading
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
@@ -112,6 +113,8 @@ def set(req: SetRequest):
 def delete(req: DeleteRequest):
     return do_replicated_operation("delete", req.key)
 
+@app.post("/")
+
 @app.post("/replicate")
 def replicate(req: ReplicateRequest):
     if req.operation == "set":
@@ -139,6 +142,18 @@ if __name__ == "__main__":
 
     if my_url == LEADER:
         _load_log_from_disk()
+        
+        def _send_heartbeats():
+            while True:
+                for node_url in NODES:
+                    if node_url != my_url:
+                        try:
+                            requests.post(f"{node_url}/heartbeat", timeout=0.5)
+                        except Exception:
+                            pass
+                time.sleep(0.15)
+
+        threading.Thread(target=_send_heartbeats, daemon=True).start()
 
     if my_url != LEADER:
         try:
