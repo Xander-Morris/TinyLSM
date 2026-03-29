@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 from typing import Literal
+import time 
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
@@ -20,6 +21,9 @@ port = None
 my_url = None
 log = []  # List containing elements with {"index": int, "operation": str, "key": str, "value": str}.
 log_index = 0
+term = 0
+voted_for = None 
+last_heartbeat = time.time() 
 
 def _append_log_entry(entry):
     with open(REPLICATION_LOG_FILE, 'a') as f:
