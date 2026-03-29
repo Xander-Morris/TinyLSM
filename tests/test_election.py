@@ -41,21 +41,22 @@ def test_election_after_leader_failure(tmp_path_factory):
         # Both survivors agree on the same leader, it is not the dead node, and term > 0.
         return leaders[0] == leaders[1] and leaders[0] != leader_url and terms[0] > 0
 
-    assert wait_for(new_leader_elected, timeout=5.0)
+    try:
+        assert wait_for(new_leader_elected, timeout=5.0)
 
-    # Writes to the surviving cluster should succeed.
-    new_leader = requests.get(f"http://localhost:{ports[1]}/status").json()["leader"]
-    resp = requests.post(f"{new_leader}/set", json={"key": "after", "value": "2"})
-    assert resp.json().get("ok") is True
+        # Writes to the surviving cluster should succeed.
+        new_leader = requests.get(f"http://localhost:{ports[1]}/status").json()["leader"]
+        resp = requests.post(f"{new_leader}/set", json={"key": "after", "value": "2"})
+        assert resp.json().get("ok") is True
 
-    # Both survivors should have the new write.
-    wait_for(lambda: all(
-        requests.get(f"http://localhost:{p}/get", params={"key": "after"}).json()["value"] == "2"
-        for p in survivors
-    ))
-    for port in survivors:
-        assert requests.get(f"http://localhost:{port}/get", params={"key": "after"}).json()["value"] == "2"
-
-    for port in survivors:
-        procs[port].terminate()
-        procs[port].wait()
+        # Both survivors should have the new write.
+        wait_for(lambda: all(
+            requests.get(f"http://localhost:{p}/get", params={"key": "after"}).json()["value"] == "2"
+            for p in survivors
+        ))
+        for port in survivors:
+            assert requests.get(f"http://localhost:{port}/get", params={"key": "after"}).json()["value"] == "2"
+    finally:
+        for port in survivors:
+            procs[port].terminate()
+            procs[port].wait()

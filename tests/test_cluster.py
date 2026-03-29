@@ -122,11 +122,12 @@ def test_replication_log_survives_leader_restart(tmp_path_factory):
         stderr=subprocess.DEVNULL,
     )
 
-    wait_for(lambda: requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1", timeout=5.0)
-    assert requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1"
-    assert requests.get(f"{follower_url}/get", params={"key": "beta"}).json()["value"] == "2"
-
-    proc2.terminate()
-    proc2.wait()
-    follower_proc.terminate()
-    follower_proc.wait()
+    try:
+        wait_for(lambda: requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1", timeout=5.0)
+        assert requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1"
+        assert requests.get(f"{follower_url}/get", params={"key": "beta"}).json()["value"] == "2"
+    finally:
+        proc2.terminate()
+        proc2.wait()
+        follower_proc.terminate()
+        follower_proc.wait()
