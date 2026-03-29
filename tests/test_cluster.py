@@ -4,17 +4,7 @@ import time
 import requests
 import sys
 import os
-
-def wait_for(fn, timeout=3.0, interval=0.05):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            if fn():
-                return True
-        except Exception:
-            pass
-        time.sleep(interval)
-    return False
+from utils import wait_for
 
 @pytest.fixture(scope="module")
 def cluster(tmp_path_factory):

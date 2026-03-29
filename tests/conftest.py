@@ -1,7 +1,7 @@
-import pytest 
-import src.config as config 
+import pytest
+import src.config as config
 import src.classes.kv_store as kv_store
-import os 
+import os
 
 # This is to automatically have the "store" as a variable passed to each testing function. 
 @pytest.fixture 
