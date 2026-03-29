@@ -55,6 +55,9 @@ class ReplicateRequest(BaseModel):
     key: str 
     value: str = None 
 
+class HeartbeatRequest(BaseModel):
+    pass 
+
 def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None = None):
     if operation != "set" and operation != "delete":
         return {"ok": False}
@@ -113,7 +116,9 @@ def set(req: SetRequest):
 def delete(req: DeleteRequest):
     return do_replicated_operation("delete", req.key)
 
-@app.post("/")
+@app.post("/heartbeat")
+def heartbeat(req: HeartbeatRequest):
+    last_heartbeat = time.time()
 
 @app.post("/replicate")
 def replicate(req: ReplicateRequest):
