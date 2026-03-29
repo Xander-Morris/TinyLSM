@@ -18,12 +18,12 @@ def cluster(tmp_path_factory):
         proc = subprocess.Popen(
             [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader, nodes],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=None,
         )
         procs.append(proc)
 
     for port in ports:
-        wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}).status_code == 200)
+        wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}).status_code == 200, timeout=15.0)
     yield ports
 
     for proc in procs:

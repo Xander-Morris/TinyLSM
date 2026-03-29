@@ -8,7 +8,7 @@ def start_node(port, data_dir, leader_url, all_nodes):
     return subprocess.Popen(
         [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader_url, all_nodes],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=None,
     )
 
 def test_election_after_leader_failure(tmp_path_factory):
@@ -22,7 +22,7 @@ def test_election_after_leader_failure(tmp_path_factory):
         procs[port] = start_node(port, data_dir, leader_url, all_nodes)
 
     for port in ports:
-        wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}).status_code == 200)
+        wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}).status_code == 200, timeout=15.0)
 
     # Confirm cluster is working.
     requests.post(f"http://localhost:{ports[0]}/set", json={"key": "before", "value": "1"})
