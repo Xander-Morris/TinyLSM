@@ -1,6 +1,6 @@
 # TinyLSM
 
-I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, snapshot reads via MVCC, and an immutable memtable for non-blocking flushes.
+I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, snapshot reads via MVCC, and an immutable memtable for non-blocking flushes. It also includes a distributed key-value layer built on top of the storage engine, with leader/follower replication, quorum writes, follower catch-up sync, and a persistent replication log that survives leader restarts.
 
 ## How to Run
 
@@ -12,6 +12,19 @@ python -m src.main       # run the REPL
 python -m src.benchmark  # run benchmarks
 pytest tests/            # run test suite
 ```
+
+To run a 3-node cluster locally:
+
+```bash
+# In three separate terminals:
+python -m src.cluster.node 8000 data/node0 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
+python -m src.cluster.node 8001 data/node1 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
+python -m src.cluster.node 8002 data/node2 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
+```
+
+Arguments: `<port> <data_dir> <leader_url> <comma_separated_node_urls>`
+
+The first node is the leader. Writes go to any node and are forwarded to the leader, which replicates to all followers and requires a majority to acknowledge before returning success.
 
 Once running, the REPL accepts the following commands:
 
@@ -74,6 +87,16 @@ Every write is assigned a monotonically increasing sequence number. The memtable
 
 ### Tombstones
 Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. During compaction, tombstones are dropped once there are no files at a lower level that could have the original value. Old versions of a key are also dropped during compaction, only the latest version survives.
+
+### Distributed Key-Value Layer
+
+The LSM-tree is wrapped in a FastAPI HTTP server. A cluster is a fixed set of nodes with one designated leader. The leader accepts writes, applies them locally, then replicates to all followers. A write is acknowledged to the caller only after a majority of nodes confirm it, so the cluster can tolerate up to `floor(n/2)` node failures without losing writes. Followers that are behind can request the full operation history from the leader via `/sync` and replay it to catch up.
+
+A write to a follower is forwarded transparently to the leader, so the caller does not need to know which node is the leader.
+
+### Persistent Replication Log
+
+Every write the leader processes is appended to an on-disk replication log (`replication.log`) in the leader's data directory. On startup, the leader reads this file back and reconstructs its in-memory log before accepting connections. This means a new or restarted follower can always sync the complete history from the leader, even after the leader has been restarted. Without this, a leader restart would wipe the in-memory log and leave any new followers unable to catch up to writes that happened before the restart.
 
 ### CRC Checksums
 Each SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and if it doesn't match a `ValueError` is raised right away instead of returning bad data.
