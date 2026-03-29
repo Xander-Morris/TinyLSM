@@ -1,3 +1,4 @@
+import random
 import sys
 import os
 import json
@@ -159,8 +160,7 @@ if __name__ == "__main__":
                 time.sleep(0.15)
 
         threading.Thread(target=_send_heartbeats, daemon=True).start()
-
-    if my_url != LEADER:
+    else:
         try:
             response = requests.get(f"{LEADER}/sync", params={"from_index": 0})
 
@@ -171,5 +171,18 @@ if __name__ == "__main__":
                     store.delete(entry["key"])
         except Exception:
             pass
+
+        ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
+
+        def _start_election():
+            pass 
+
+        def _election_timeout_watcher():
+            while True: 
+                if time.time() - last_heartbeat > ELECTION_TIMEOUT: 
+                    _start_election() 
+                time.sleep(0.05)
+        
+        threading.Thread(target=_election_timeout_watcher, daemon=True).start()
 
     uvicorn.run(app, host="0.0.0.0", port=port)
