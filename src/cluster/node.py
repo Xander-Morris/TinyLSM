@@ -44,6 +44,16 @@ def _load_log_from_disk():
     except FileNotFoundError:
         pass
 
+def _send_heartbeats():
+    while True:
+        for node_url in NODES:
+            if node_url != my_url:
+                try:
+                    requests.post(f"{node_url}/heartbeat", json={"leader_url": my_url, "term": term}, timeout=0.5)
+                except Exception:
+                    pass
+        time.sleep(0.15)
+
 def _start_election():
     global term, voted_for
     term += 1
@@ -66,6 +76,7 @@ def _start_election():
     if votes >= majority:
         global LEADER
         LEADER = my_url
+        threading.Thread(target=_send_heartbeats, daemon=True).start()
 
 class SetRequest(BaseModel):
     key: str
@@ -82,6 +93,10 @@ class ReplicateRequest(BaseModel):
 class VoteRequest(BaseModel):
     candidate_url: str
     term: int 
+
+class HeartbeatRequest(BaseModel):
+    leader_url: str
+    term: int
 
 def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None = None):
     if operation != "set" and operation != "delete":
@@ -142,9 +157,11 @@ def delete(req: DeleteRequest):
     return do_replicated_operation("delete", req.key)
 
 @app.post("/heartbeat")
-def heartbeat():
-    global last_heartbeat 
+def heartbeat(req: HeartbeatRequest):
+    global last_heartbeat, LEADER, term
     last_heartbeat = time.time()
+    LEADER = req.leader_url
+    term = req.term
 
     return {"ok": True}
 
@@ -167,6 +184,8 @@ def vote(req: VoteRequest):
 
         return {"vote_granted": True} 
 
+    return {"vote_granted": False}
+
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
     data_dir = sys.argv[2] if len(sys.argv) > 2 else f"node_data_{port}"
@@ -185,17 +204,6 @@ if __name__ == "__main__":
 
     if my_url == LEADER:
         _load_log_from_disk()
-        
-        def _send_heartbeats():
-            while True:
-                for node_url in NODES:
-                    if node_url != my_url:
-                        try:
-                            requests.post(f"{node_url}/heartbeat", timeout=0.5)
-                        except Exception:
-                            pass
-                time.sleep(0.15)
-
         threading.Thread(target=_send_heartbeats, daemon=True).start()
     else:
         try:
