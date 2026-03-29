@@ -45,6 +45,7 @@ def _load_log_from_disk():
         pass
 
 def _start_election():
+    global term, voted_for
     term += 1
     voted_for = my_url 
     votes = 1 
@@ -52,9 +53,19 @@ def _start_election():
     for node_url in NODES:
         if node_url != my_url:
             try:
-                requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": term}, timeout=1)
+                response = requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": term}, timeout=1)
+            
+                if response.json().get("vote_granted"):
+                    votes += 1
             except Exception:
                 pass
+
+    total_nodes = len(NODES)
+    majority = (total_nodes // 2) + 1
+
+    if votes >= majority:
+        global LEADER
+        LEADER = my_url
 
 class SetRequest(BaseModel):
     key: str
@@ -148,10 +159,10 @@ def replicate(req: ReplicateRequest):
 
 @app.post("/vote")
 def vote(req: VoteRequest):
-    if req.term > term or voted_for is None or voted_for == req.candidate_url:
+    if req.term > term or (req.term == term and (voted_for is None or voted_for == req.candidate_url)):
+        global term, voted_for, last_heartbeat
         term = req.term 
         voted_for = req.candidate_url 
-        global last_heartbeat
         last_heartbeat = time.time() 
 
         return {"vote_granted": True} 
