@@ -159,10 +159,12 @@ def delete(req: DeleteRequest):
 @app.post("/heartbeat")
 def heartbeat(req: HeartbeatRequest):
     global last_heartbeat, LEADER, term
-    last_heartbeat = time.time()
-    LEADER = req.leader_url
-    term = req.term
 
+    if req.term >= term:
+        last_heartbeat = time.time()
+        LEADER = req.leader_url
+        term = req.term
+        
     return {"ok": True}
 
 @app.post("/replicate")
@@ -220,9 +222,9 @@ if __name__ == "__main__":
         ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
 
         def _election_timeout_watcher():
-            while True: 
-                if time.time() - last_heartbeat > ELECTION_TIMEOUT: 
-                    _start_election() 
+            while True:
+                if my_url != LEADER and time.time() - last_heartbeat > ELECTION_TIMEOUT:
+                    _start_election()
                 time.sleep(0.05)
         
         threading.Thread(target=_election_timeout_watcher, daemon=True).start()
