@@ -194,8 +194,8 @@ def replicate(req: ReplicateRequest):
     elif req.operation == "delete":
         store.delete(req.key)
 
-    log_index += 1
-    entry = {"index": log_index, "operation": req.operation, "key": req.key, "value": req.value}
+    log_index = req.index
+    entry = {"index": req.index, "operation": req.operation, "key": req.key, "value": req.value}
     log.append(entry)
     _append_log_entry(entry)
 
