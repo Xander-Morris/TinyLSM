@@ -84,7 +84,6 @@ def _start_election():
             
                 if response.json().get("vote_granted"):
                     votes += 1
-                    _write_to_state()
             except Exception:
                 pass
 
