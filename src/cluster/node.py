@@ -103,9 +103,10 @@ class DeleteRequest(BaseModel):
     key: str
 
 class ReplicateRequest(BaseModel):
-    operation: str # "set" or "delete"
-    key: str 
-    value: str = None 
+    operation: str
+    key: str
+    value: str = None
+    index: int 
 
 class VoteRequest(BaseModel):
     candidate_url: str
@@ -146,7 +147,7 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     for node_url in NODES:
         if node_url != my_url:
             try:
-                requests.post(f"{node_url}/replicate", json={"operation": operation, **json_tbl}, timeout=1)
+                requests.post(f"{node_url}/replicate", json={"operation": operation, "index": log_index, **json_tbl}, timeout=1)
                 successes += 1
             except Exception:
                 pass
@@ -186,10 +187,17 @@ def heartbeat(req: HeartbeatRequest):
 
 @app.post("/replicate")
 def replicate(req: ReplicateRequest):
+    global log_index
+
     if req.operation == "set":
         store.set(req.key, req.value)
     elif req.operation == "delete":
         store.delete(req.key)
+
+    log_index += 1
+    entry = {"index": log_index, "operation": req.operation, "key": req.key, "value": req.value}
+    log.append(entry)
+    _append_log_entry(entry)
 
     return {"ok": True}
 
