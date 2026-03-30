@@ -28,10 +28,20 @@ term = 0
 voted_for = None 
 last_heartbeat = time.time() 
 
+def _load_state_from_disk():
+    global term, voted_for
+
+    try:
+        with open(STATE_FILE, 'r') as f:
+            state = json.loads(f.read())
+            term = state["term"]
+            voted_for = state["voted_for"]
+    except FileNotFoundError:
+        pass
+
 def _write_to_state():
-    with open(STATE_FILE, 'a') as f: 
-        entry = {"term": term, "voted_for": voted_for}
-        f.write(json.dumps(entry))
+    with open(STATE_FILE, 'w') as f:
+        f.write(json.dumps({"term": term, "voted_for": voted_for}))
 
 def _append_log_entry(entry):
     with open(REPLICATION_LOG_FILE, 'a') as f:
@@ -195,6 +205,7 @@ def vote(req: VoteRequest):
         term = req.term
         voted_for = req.candidate_url
         last_heartbeat = time.time()
+        _write_to_state()
 
         return {"vote_granted": True}
 
@@ -217,6 +228,7 @@ if __name__ == "__main__":
     my_url = f"http://localhost:{port}"
 
     _load_log_from_disk()
+    _load_state_from_disk()
 
     # Sync from the configured leader if we're a new node joining an existing cluster.
     if my_url != LEADER:
