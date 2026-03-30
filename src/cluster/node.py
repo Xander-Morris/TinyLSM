@@ -25,8 +25,9 @@ my_url = None
 log = []  # List containing elements with {"index": int, "operation": str, "key": str, "value": str}.
 log_index = 0
 term = 0
-voted_for = None 
-last_heartbeat = time.time() 
+voted_for = None
+last_heartbeat = time.time()
+follower_indices = {}  # {node_url: last_known_log_index}
 
 def _load_state_from_disk():
     global term, voted_for
@@ -65,7 +66,14 @@ def _send_heartbeats():
         for node_url in NODES:
             if node_url != my_url:
                 try:
-                    requests.post(f"{node_url}/heartbeat", json={"leader_url": my_url, "term": term}, timeout=0.5)
+                    follower_index = follower_indices.get(node_url, 0)
+                    entries_to_send = log[follower_index:]
+                    response = requests.post(f"{node_url}/heartbeat", json={
+                        "leader_url": my_url,
+                        "term": term,
+                        "entries": entries_to_send,
+                    }, timeout=0.5)
+                    follower_indices[node_url] = response.json().get("log_index", follower_index)
                 except Exception:
                     pass
         time.sleep(0.15)
@@ -115,6 +123,7 @@ class VoteRequest(BaseModel):
 class HeartbeatRequest(BaseModel):
     leader_url: str
     term: int
+    entries: list = []
 
 def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None = None):
     if operation != "set" and operation != "delete":
@@ -176,14 +185,24 @@ def delete(req: DeleteRequest):
 
 @app.post("/heartbeat")
 def heartbeat(req: HeartbeatRequest):
-    global last_heartbeat, LEADER, term
+    global last_heartbeat, LEADER, term, log_index
 
     if req.term >= term:
         last_heartbeat = time.time()
         LEADER = req.leader_url
         term = req.term
-        
-    return {"ok": True}
+
+        for entry in req.entries:
+            if entry["index"] > log_index:
+                if entry["operation"] == "set":
+                    store.set(entry["key"], entry["value"])
+                elif entry["operation"] == "delete":
+                    store.delete(entry["key"])
+                log.append(entry)
+                log_index = entry["index"]
+                _append_log_entry(entry)
+
+    return {"ok": True, "log_index": log_index}
 
 @app.post("/replicate")
 def replicate(req: ReplicateRequest):
