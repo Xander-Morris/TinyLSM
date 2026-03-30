@@ -240,7 +240,8 @@ if __name__ == "__main__":
     # Sync from the configured leader if we're a new node joining an existing cluster.
     if my_url != LEADER:
         try:
-            response = requests.get(f"{LEADER}/sync", params={"from_index": 0})
+            response = requests.get(f"{LEADER}/sync", params={"from_index": log_index})
+
             for entry in response.json()["entries"]:
                 if entry["operation"] == "set":
                     store.set(entry["key"], entry["value"])
