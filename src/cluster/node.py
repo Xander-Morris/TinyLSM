@@ -14,6 +14,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
 
 REPLICATION_LOG_FILE = "replication.log"
+STATE_FILE = "state.json"
 
 app = FastAPI()
 LEADER = None
@@ -26,6 +27,11 @@ log_index = 0
 term = 0
 voted_for = None 
 last_heartbeat = time.time() 
+
+def _write_to_state():
+    with open(STATE_FILE, 'a') as f: 
+        entry = {"term": term, "voted_for": voted_for}
+        f.write(json.dumps(entry))
 
 def _append_log_entry(entry):
     with open(REPLICATION_LOG_FILE, 'a') as f:
@@ -45,7 +51,7 @@ def _load_log_from_disk():
         pass
 
 def _send_heartbeats():
-    while True:
+    while LEADER == my_url:
         for node_url in NODES:
             if node_url != my_url:
                 try:
@@ -59,6 +65,7 @@ def _start_election():
     term += 1
     voted_for = my_url 
     votes = 1 
+    _write_to_state()
 
     for node_url in NODES:
         if node_url != my_url:
@@ -67,6 +74,7 @@ def _start_election():
             
                 if response.json().get("vote_granted"):
                     votes += 1
+                    _write_to_state()
             except Exception:
                 pass
 
@@ -108,7 +116,7 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
 
     if my_url != LEADER:
         # Forward it to the leader if this node is not the leader.
-        response = requests.post(f"{LEADER}/{operation}", json=json_tbl)
+        response = requests.post(f"{LEADER}/{operation}", json=json_tbl, timeout=5)
         return response.json()
 
     if operation == "set":
@@ -176,15 +184,19 @@ def replicate(req: ReplicateRequest):
 
     return {"ok": True}
 
+@app.get("/status")
+def status():
+    return {"leader": LEADER, "term": term, "my_url": my_url}
+
 @app.post("/vote")
 def vote(req: VoteRequest):
+    global term, voted_for, last_heartbeat
     if req.term > term or (req.term == term and (voted_for is None or voted_for == req.candidate_url)):
-        global term, voted_for, last_heartbeat
-        term = req.term 
-        voted_for = req.candidate_url 
-        last_heartbeat = time.time() 
+        term = req.term
+        voted_for = req.candidate_url
+        last_heartbeat = time.time()
 
-        return {"vote_granted": True} 
+        return {"vote_granted": True}
 
     return {"vote_granted": False}
 
@@ -204,13 +216,12 @@ if __name__ == "__main__":
     store = kv_store.KVStore()
     my_url = f"http://localhost:{port}"
 
-    if my_url == LEADER:
-        _load_log_from_disk()
-        threading.Thread(target=_send_heartbeats, daemon=True).start()
-    else:
+    _load_log_from_disk()
+
+    # Sync from the configured leader if we're a new node joining an existing cluster.
+    if my_url != LEADER:
         try:
             response = requests.get(f"{LEADER}/sync", params={"from_index": 0})
-
             for entry in response.json()["entries"]:
                 if entry["operation"] == "set":
                     store.set(entry["key"], entry["value"])
@@ -219,14 +230,14 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-        ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
+    ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
 
-        def _election_timeout_watcher():
-            while True:
-                if my_url != LEADER and time.time() - last_heartbeat > ELECTION_TIMEOUT:
-                    _start_election()
-                time.sleep(0.05)
-        
-        threading.Thread(target=_election_timeout_watcher, daemon=True).start()
+    def _election_timeout_watcher():
+        while True:
+            if my_url != LEADER and time.time() - last_heartbeat > ELECTION_TIMEOUT:
+                _start_election()
+            time.sleep(0.05)
+
+    threading.Thread(target=_election_timeout_watcher, daemon=True).start()
 
     uvicorn.run(app, host="0.0.0.0", port=port)

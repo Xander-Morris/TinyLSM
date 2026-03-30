@@ -23,7 +23,16 @@ def cluster(tmp_path_factory):
         procs.append(proc)
 
     for port in ports:
-        wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}).status_code == 200, timeout=15.0)
+        ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
+        assert ok, f"Node on port {port} did not start in time"
+
+    def cluster_stable():
+        statuses = [requests.get(f"http://localhost:{p}/status", timeout=2).json() for p in ports]
+        leaders = [s["leader"] for s in statuses]
+        return len(set(leaders)) == 1 and all(leaders)
+
+    ok = wait_for(cluster_stable, timeout=10.0)
+    assert ok, "Cluster did not elect a stable leader"
     yield ports
 
     for proc in procs:
@@ -32,45 +41,45 @@ def cluster(tmp_path_factory):
 
 def test_replication(cluster):
     ports = cluster
-    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "foo", "value": "bar"})
+    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "foo", "value": "bar"}, timeout=5)
     wait_for(lambda: all(
-        requests.get(f"http://localhost:{p}/get", params={"key": "foo"}).json()["value"] == "bar"
+        requests.get(f"http://localhost:{p}/get", params={"key": "foo"}, timeout=2).json()["value"] == "bar"
         for p in ports
     ))
     for port in ports:
-        assert requests.get(f"http://localhost:{port}/get", params={"key": "foo"}).json()["value"] == "bar"
+        assert requests.get(f"http://localhost:{port}/get", params={"key": "foo"}, timeout=2).json()["value"] == "bar"
 
 def test_follower_write_forwarded_to_leader(cluster):
     ports = cluster
-    requests.post(f"http://localhost:{ports[1]}/set", json={"key": "follower_write", "value": "yes"})
+    requests.post(f"http://localhost:{ports[1]}/set", json={"key": "follower_write", "value": "yes"}, timeout=5)
     wait_for(lambda: all(
-        requests.get(f"http://localhost:{p}/get", params={"key": "follower_write"}).json()["value"] == "yes"
+        requests.get(f"http://localhost:{p}/get", params={"key": "follower_write"}, timeout=2).json()["value"] == "yes"
         for p in ports
     ))
     for port in ports:
-        assert requests.get(f"http://localhost:{port}/get", params={"key": "follower_write"}).json()["value"] == "yes"
+        assert requests.get(f"http://localhost:{port}/get", params={"key": "follower_write"}, timeout=2).json()["value"] == "yes"
 
 def test_delete_replicates(cluster):
     ports = cluster
-    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "to_delete", "value": "temp"})
-    requests.post(f"http://localhost:{ports[0]}/delete", json={"key": "to_delete"})
+    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "to_delete", "value": "temp"}, timeout=5)
+    requests.post(f"http://localhost:{ports[0]}/delete", json={"key": "to_delete"}, timeout=5)
     wait_for(lambda: all(
-        requests.get(f"http://localhost:{p}/get", params={"key": "to_delete"}).json()["value"] is None
+        requests.get(f"http://localhost:{p}/get", params={"key": "to_delete"}, timeout=2).json()["value"] is None
         for p in ports
     ))
     for port in ports:
-        assert requests.get(f"http://localhost:{port}/get", params={"key": "to_delete"}).json()["value"] is None
+        assert requests.get(f"http://localhost:{port}/get", params={"key": "to_delete"}, timeout=2).json()["value"] is None
 
 def test_catchup_after_restart(cluster, tmp_path_factory):
     ports = cluster
-    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "before_down", "value": "1"})
+    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "before_down", "value": "1"}, timeout=5)
     wait_for(lambda: all(
-        requests.get(f"http://localhost:{p}/get", params={"key": "before_down"}).json()["value"] == "1"
+        requests.get(f"http://localhost:{p}/get", params={"key": "before_down"}, timeout=2).json()["value"] == "1"
         for p in ports
     ))
-    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "missed_write", "value": "2"})
+    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "missed_write", "value": "2"}, timeout=5)
     wait_for(lambda: all(
-        requests.get(f"http://localhost:{p}/get", params={"key": "missed_write"}).json()["value"] == "2"
+        requests.get(f"http://localhost:{p}/get", params={"key": "missed_write"}, timeout=2).json()["value"] == "2"
         for p in ports
     ))
     port = 8103
@@ -82,8 +91,8 @@ def test_catchup_after_restart(cluster, tmp_path_factory):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    wait_for(lambda: requests.get(f"http://localhost:{port}/get", params={"key": "missed_write"}).json()["value"] == "2", timeout=5.0)
-    assert requests.get(f"http://localhost:{port}/get", params={"key": "missed_write"}).json()["value"] == "2"
+    wait_for(lambda: requests.get(f"http://localhost:{port}/get", params={"key": "missed_write"}, timeout=2).json()["value"] == "2", timeout=5.0)
+    assert requests.get(f"http://localhost:{port}/get", params={"key": "missed_write"}, timeout=2).json()["value"] == "2"
     proc.terminate()
     proc.wait()
 
@@ -97,9 +106,9 @@ def test_replication_log_survives_leader_restart(tmp_path_factory):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}).status_code == 200)
-    requests.post(f"{url}/set", json={"key": "alpha", "value": "1"})
-    requests.post(f"{url}/set", json={"key": "beta", "value": "2"})
+    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
+    requests.post(f"{url}/set", json={"key": "alpha", "value": "1"}, timeout=5)
+    requests.post(f"{url}/set", json={"key": "beta", "value": "2"}, timeout=5)
 
     proc.terminate()
     proc.wait()
@@ -109,7 +118,7 @@ def test_replication_log_survives_leader_restart(tmp_path_factory):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}).status_code == 200)
+    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
 
     follower_port = 8201
     follower_url = f"http://localhost:{follower_port}"
@@ -123,9 +132,9 @@ def test_replication_log_survives_leader_restart(tmp_path_factory):
     )
 
     try:
-        wait_for(lambda: requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1", timeout=5.0)
-        assert requests.get(f"{follower_url}/get", params={"key": "alpha"}).json()["value"] == "1"
-        assert requests.get(f"{follower_url}/get", params={"key": "beta"}).json()["value"] == "2"
+        wait_for(lambda: requests.get(f"{follower_url}/get", params={"key": "alpha"}, timeout=2).json()["value"] == "1", timeout=5.0)
+        assert requests.get(f"{follower_url}/get", params={"key": "alpha"}, timeout=2).json()["value"] == "1"
+        assert requests.get(f"{follower_url}/get", params={"key": "beta"}, timeout=2).json()["value"] == "2"
     finally:
         proc2.terminate()
         proc2.wait()

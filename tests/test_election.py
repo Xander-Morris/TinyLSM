@@ -1,5 +1,4 @@
 import subprocess
-import time
 import requests
 import sys
 from utils import wait_for
@@ -22,10 +21,11 @@ def test_election_after_leader_failure(tmp_path_factory):
         procs[port] = start_node(port, data_dir, leader_url, all_nodes)
 
     for port in ports:
-        wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}).status_code == 200, timeout=15.0)
+        ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
+        assert ok, f"Node on port {port} did not start in time"
 
     # Confirm cluster is working.
-    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "before", "value": "1"})
+    requests.post(f"http://localhost:{ports[0]}/set", json={"key": "before", "value": "1"}, timeout=5)
 
     # Kill the leader.
     procs[ports[0]].terminate()
@@ -35,7 +35,7 @@ def test_election_after_leader_failure(tmp_path_factory):
 
     # Wait for the survivors to elect a new leader.
     def new_leader_elected():
-        statuses = [requests.get(f"http://localhost:{p}/status").json() for p in survivors]
+        statuses = [requests.get(f"http://localhost:{p}/status", timeout=2).json() for p in survivors]
         leaders = [s["leader"] for s in statuses]
         terms = [s["term"] for s in statuses]
         # Both survivors agree on the same leader, it is not the dead node, and term > 0.
@@ -45,17 +45,17 @@ def test_election_after_leader_failure(tmp_path_factory):
         assert wait_for(new_leader_elected, timeout=5.0)
 
         # Writes to the surviving cluster should succeed.
-        new_leader = requests.get(f"http://localhost:{ports[1]}/status").json()["leader"]
-        resp = requests.post(f"{new_leader}/set", json={"key": "after", "value": "2"})
+        new_leader = requests.get(f"http://localhost:{ports[1]}/status", timeout=2).json()["leader"]
+        resp = requests.post(f"{new_leader}/set", json={"key": "after", "value": "2"}, timeout=5)
         assert resp.json().get("ok") is True
 
         # Both survivors should have the new write.
         wait_for(lambda: all(
-            requests.get(f"http://localhost:{p}/get", params={"key": "after"}).json()["value"] == "2"
+            requests.get(f"http://localhost:{p}/get", params={"key": "after"}, timeout=2).json()["value"] == "2"
             for p in survivors
         ))
         for port in survivors:
-            assert requests.get(f"http://localhost:{port}/get", params={"key": "after"}).json()["value"] == "2"
+            assert requests.get(f"http://localhost:{port}/get", params={"key": "after"}, timeout=2).json()["value"] == "2"
     finally:
         for port in survivors:
             procs[port].terminate()
