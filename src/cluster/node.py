@@ -247,6 +247,8 @@ if __name__ == "__main__":
                     store.set(entry["key"], entry["value"])
                 elif entry["operation"] == "delete":
                     store.delete(entry["key"])
+                log.append(entry)
+                log_index = entry["index"]
         except Exception:
             pass
 
