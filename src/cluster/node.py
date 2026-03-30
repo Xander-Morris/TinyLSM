@@ -279,6 +279,9 @@ if __name__ == "__main__":
                 _start_election()
             time.sleep(0.05)
 
+    if my_url == LEADER:
+        threading.Thread(target=_send_heartbeats, daemon=True).start()
+
     threading.Thread(target=_election_timeout_watcher, daemon=True).start()
 
     uvicorn.run(app, host="0.0.0.0", port=port)
