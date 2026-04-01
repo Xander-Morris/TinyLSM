@@ -573,6 +573,10 @@ class KVStore:
                 "write_amplification": write_amplification,
             }
         
+    def dump(self):
+        # "\U0010FFFF" is the largest possible Unicode character to make the range cover all keys.
+        return dict(self.scan("", "\U0010FFFF"))
+
     # Write Operations
     def set(self, key: str, value: str):
         with self._lock.write():
