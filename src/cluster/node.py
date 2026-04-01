@@ -28,6 +28,7 @@ term = 0
 voted_for = None
 last_heartbeat = time.time()
 follower_indices = {}  # {node_url: last_known_log_index}
+_vote_lock = threading.Lock()
 
 def _load_state_from_disk():
     global term, voted_for
@@ -80,25 +81,39 @@ def _send_heartbeats():
 
 def _start_election():
     global term, voted_for
-    term += 1
-    voted_for = my_url 
-    votes = 1 
+    with _vote_lock:
+        term += 1
+        voted_for = my_url
+    my_term = term
+    votes = 1
     _write_to_state()
+
+    vote_lock = threading.Lock()
+    threads = []
+
+    def request_vote(node_url):
+        nonlocal votes
+        try:
+            response = requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": my_term}, timeout=0.5)
+            if response.json().get("vote_granted"):
+                with vote_lock:
+                    votes += 1
+        except Exception:
+            pass
 
     for node_url in NODES:
         if node_url != my_url:
-            try:
-                response = requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": term}, timeout=1)
-            
-                if response.json().get("vote_granted"):
-                    votes += 1
-            except Exception:
-                pass
+            t = threading.Thread(target=request_vote, args=(node_url,))
+            t.start()
+            threads.append(t)
+
+    for t in threads:
+        t.join()
 
     total_nodes = len(NODES)
     majority = (total_nodes // 2) + 1
 
-    if votes >= majority:
+    if votes >= majority and term == my_term:
         global LEADER
         LEADER = my_url
         threading.Thread(target=_send_heartbeats, daemon=True).start()
@@ -227,14 +242,13 @@ def status():
 @app.post("/vote")
 def vote(req: VoteRequest):
     global term, voted_for, last_heartbeat
-    if req.term > term or (req.term == term and (voted_for is None or voted_for == req.candidate_url)):
-        term = req.term
-        voted_for = req.candidate_url
-        last_heartbeat = time.time()
-        _write_to_state()
-
-        return {"vote_granted": True}
-
+    with _vote_lock:
+        if req.term > term or (req.term == term and (voted_for is None or voted_for == req.candidate_url)):
+            term = req.term
+            voted_for = req.candidate_url
+            last_heartbeat = time.time()
+            _write_to_state()
+            return {"vote_granted": True}
     return {"vote_granted": False}
 
 if __name__ == "__main__":
@@ -272,11 +286,14 @@ if __name__ == "__main__":
             pass
 
     ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
+    last_heartbeat = time.time()  # Reset so the timer starts from when the node is ready.
 
     def _election_timeout_watcher():
+        global last_heartbeat
         while True:
             if my_url != LEADER and time.time() - last_heartbeat > ELECTION_TIMEOUT:
                 _start_election()
+                last_heartbeat = time.time()  # Back off after any election attempt.
             time.sleep(0.05)
 
     if my_url == LEADER:

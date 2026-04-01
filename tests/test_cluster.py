@@ -6,6 +6,20 @@ import sys
 import os
 from utils import wait_for
 
+
+def _kill_port(port):
+    """Kill any process listening on the given port (Windows)."""
+    result = subprocess.run(
+        f'netstat -ano | findstr ":{port}" | findstr "LISTENING"',
+        shell=True, capture_output=True, text=True,
+    )
+    for line in result.stdout.strip().splitlines():
+        parts = line.split()
+        if parts:
+            subprocess.run(f"taskkill /F /PID {parts[-1]}", shell=True, capture_output=True)
+    time.sleep(0.3)
+
+
 @pytest.fixture(scope="module")
 def cluster(tmp_path_factory):
     procs = []
@@ -13,31 +27,42 @@ def cluster(tmp_path_factory):
     leader = f"http://localhost:{ports[0]}"
     nodes = ",".join(f"http://localhost:{p}" for p in ports)
 
-    for port in ports:
-        data_dir = tmp_path_factory.mktemp(f"node_{port}")
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader, nodes],
-            stdout=subprocess.DEVNULL,
-            stderr=None,
-        )
-        procs.append(proc)
+    try:
+        for port in ports:
+            _kill_port(port)
 
-    for port in ports:
-        ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
-        assert ok, f"Node on port {port} did not start in time"
+        for port in ports:
+            data_dir = tmp_path_factory.mktemp(f"node_{port}")
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader, nodes],
+                stdout=subprocess.DEVNULL,
+                stderr=None,
+            )
+            procs.append(proc)
 
-    def cluster_stable():
-        statuses = [requests.get(f"http://localhost:{p}/status", timeout=2).json() for p in ports]
-        leaders = [s["leader"] for s in statuses]
-        return len(set(leaders)) == 1 and all(leaders)
+        for port in ports:
+            ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
+            assert ok, f"Node on port {port} did not start in time"
 
-    ok = wait_for(cluster_stable, timeout=10.0)
-    assert ok, "Cluster did not elect a stable leader"
-    yield ports
+        def cluster_stable():
+            statuses = [requests.get(f"http://localhost:{p}/status", timeout=2).json() for p in ports]
+            leaders = [s["leader"] for s in statuses]
+            return len(set(leaders)) == 1 and all(leaders)
 
-    for proc in procs:
-        proc.terminate()
-        proc.wait()
+        ok = wait_for(cluster_stable, timeout=10.0)
+        if not ok:
+            for p in ports:
+                try:
+                    s = requests.get(f"http://localhost:{p}/status", timeout=2).json()
+                    print(f"  port {p}: {s}", flush=True)
+                except Exception as e:
+                    print(f"  port {p}: ERROR {e}", flush=True)
+        assert ok, "Cluster did not elect a stable leader"
+        yield ports
+    finally:
+        for proc in procs:
+            proc.terminate()
+            proc.wait()
 
 def test_replication(cluster):
     ports = cluster

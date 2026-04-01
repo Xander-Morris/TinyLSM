@@ -1,7 +1,21 @@
 import subprocess
 import requests
 import sys
+import time
 from utils import wait_for
+
+
+def _kill_port(port):
+    result = subprocess.run(
+        f'netstat -ano | findstr ":{port}" | findstr "LISTENING"',
+        shell=True, capture_output=True, text=True,
+    )
+    for line in result.stdout.strip().splitlines():
+        parts = line.split()
+        if parts:
+            subprocess.run(f"taskkill /F /PID {parts[-1]}", shell=True, capture_output=True)
+    time.sleep(0.3)
+
 
 def start_node(port, data_dir, leader_url, all_nodes):
     return subprocess.Popen(
@@ -15,6 +29,9 @@ def test_election_after_leader_failure(tmp_path_factory):
     leader_url = f"http://localhost:{ports[0]}"
     all_nodes = ",".join(f"http://localhost:{p}" for p in ports)
     procs = {}
+
+    for port in ports:
+        _kill_port(port)
 
     for port in ports:
         data_dir = tmp_path_factory.mktemp(f"election_{port}")
