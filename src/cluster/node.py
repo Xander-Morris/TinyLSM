@@ -296,7 +296,7 @@ if __name__ == "__main__":
     _load_log_from_disk()
     _load_state_from_disk()
 
-    # Sync from the configured leader if we're a new node joining an existing cluster.
+    # Sync from the configured leader if it's a new node joining an existing cluster.
     if my_url != LEADER:
         try:
             response = requests.get(f"{LEADER}/sync", params={"from_index": log_index})
@@ -312,19 +312,20 @@ if __name__ == "__main__":
             pass
 
     ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
-    last_heartbeat = time.time()  # Reset so the timer starts from when the node is ready.
+    last_heartbeat = time.time() 
 
     def _election_timeout_watcher():
-        global last_heartbeat
+        global last_heartbeat, ELECTION_TIMEOUT
+
         while True:
             if my_url != LEADER and time.time() - last_heartbeat > ELECTION_TIMEOUT:
                 _start_election()
                 ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
-                last_heartbeat = time.time()  # Back off after any election attempt.
+                last_heartbeat = time.time() 
             time.sleep(0.05)
 
     if my_url == LEADER:
-        voted_for = my_url  # Treat as if we won the initial epoch.
+        voted_for = my_url 
         threading.Thread(target=_send_heartbeats, daemon=True).start()
 
     threading.Thread(target=_election_timeout_watcher, daemon=True).start()
