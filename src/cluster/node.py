@@ -3,11 +3,12 @@ import sys
 import os
 import json
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 from typing import Literal
-import time 
+import time
 import threading
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
@@ -16,7 +17,13 @@ import src.classes.kv_store as kv_store
 REPLICATION_LOG_FILE = "replication.log"
 STATE_FILE = "state.json"
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global last_heartbeat
+    last_heartbeat = time.time()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 LEADER = None
 NODES = []
 store = None
@@ -63,20 +70,28 @@ def _load_log_from_disk():
         pass
 
 def _send_heartbeats():
+    def _heartbeat_one(node_url):
+        try:
+            follower_index = follower_indices.get(node_url, 0)
+            entries_to_send = log[follower_index:]
+            response = requests.post(f"{node_url}/heartbeat", json={
+                "leader_url": my_url,
+                "term": term,
+                "entries": entries_to_send,
+            }, timeout=0.1)
+            follower_indices[node_url] = response.json().get("log_index", follower_index)
+        except Exception:
+            pass
+
     while LEADER == my_url and voted_for == my_url:
-        for node_url in NODES:
-            if node_url != my_url:
-                try:
-                    follower_index = follower_indices.get(node_url, 0)
-                    entries_to_send = log[follower_index:]
-                    response = requests.post(f"{node_url}/heartbeat", json={
-                        "leader_url": my_url,
-                        "term": term,
-                        "entries": entries_to_send,
-                    }, timeout=0.5)
-                    follower_indices[node_url] = response.json().get("log_index", follower_index)
-                except Exception:
-                    pass
+        threads = [
+            threading.Thread(target=_heartbeat_one, args=(url,), daemon=True)
+            for url in NODES if url != my_url
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         time.sleep(0.15)
 
 def _start_election():
@@ -167,14 +182,25 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     successes = 1  # The leader itself counts as 1.
     total_nodes = len(NODES)
     majority = (total_nodes // 2) + 1
+    _successes_lock = threading.Lock()
 
-    for node_url in NODES:
-        if node_url != my_url:
-            try:
-                requests.post(f"{node_url}/replicate", json={"operation": operation, "index": log_index, **json_tbl}, timeout=1)
+    def _replicate_one(node_url):
+        nonlocal successes
+        try:
+            requests.post(f"{node_url}/replicate", json={"operation": operation, "index": log_index, **json_tbl}, timeout=1)
+            with _successes_lock:
                 successes += 1
-            except Exception:
-                pass
+        except Exception:
+            pass
+
+    threads = [
+        threading.Thread(target=_replicate_one, args=(url,))
+        for url in NODES if url != my_url
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
     if successes >= majority:
         return {"ok": True}
@@ -293,6 +319,7 @@ if __name__ == "__main__":
         while True:
             if my_url != LEADER and time.time() - last_heartbeat > ELECTION_TIMEOUT:
                 _start_election()
+                ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
                 last_heartbeat = time.time()  # Back off after any election attempt.
             time.sleep(0.05)
 
