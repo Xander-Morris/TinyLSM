@@ -62,7 +62,7 @@ def _load_log_from_disk():
         pass
 
 def _send_heartbeats():
-    while LEADER == my_url:
+    while LEADER == my_url and voted_for == my_url:
         for node_url in NODES:
             if node_url != my_url:
                 try:
@@ -280,6 +280,7 @@ if __name__ == "__main__":
             time.sleep(0.05)
 
     if my_url == LEADER:
+        voted_for = my_url  # Treat as if we won the initial epoch.
         threading.Thread(target=_send_heartbeats, daemon=True).start()
 
     threading.Thread(target=_election_timeout_watcher, daemon=True).start()
