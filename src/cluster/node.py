@@ -109,7 +109,7 @@ def _start_election():
     def request_vote(node_url):
         nonlocal votes
         try:
-            response = requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": my_term}, timeout=0.5)
+            response = requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": my_term}, timeout=0.2)
             if response.json().get("vote_granted"):
                 with vote_lock:
                     votes += 1
@@ -311,7 +311,7 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
+    ELECTION_TIMEOUT = random.uniform(0.5, 1.5)
     last_heartbeat = time.time() 
 
     def _election_timeout_watcher():
@@ -320,7 +320,7 @@ if __name__ == "__main__":
         while True:
             if my_url != LEADER and time.time() - last_heartbeat > ELECTION_TIMEOUT:
                 _start_election()
-                ELECTION_TIMEOUT = random.uniform(0.3, 0.6)
+                ELECTION_TIMEOUT = random.uniform(0.5, 1.5)
                 last_heartbeat = time.time() 
             time.sleep(0.05)
 
