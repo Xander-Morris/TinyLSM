@@ -4,8 +4,8 @@ import time
 import requests
 import sys
 import os
+import json 
 from utils import wait_for
-
 
 def _kill_port(port):
     """Kill any process listening on the given port (Windows)."""
@@ -18,7 +18,6 @@ def _kill_port(port):
         if parts:
             subprocess.run(f"taskkill /F /PID {parts[-1]}", shell=True, capture_output=True)
     time.sleep(0.3)
-
 
 @pytest.fixture(scope="module")
 def cluster(tmp_path_factory):
@@ -179,7 +178,15 @@ def test_compaction(tmp_path_factory):
     wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
 
     for i in range(1002):
-        wait_for(lambda: requests.post(f"{url}/set", params={"key": f"set_{i}", "value": f"test"}, timeout=2).status_code == 200)
+        requests.post(f"{url}/set", json={"key": f"key_{i}", "value": str(i)}, timeout=5)
 
     proc.terminate()
     proc.wait()
+
+    snapshot_path = data_dir / "snapshot.json"
+    assert snapshot_path.exists()
+
+    snapshot = json.loads(snapshot_path.read_text())
+    assert snapshot["index"] == 1001
+    assert snapshot["data"]["key_0"] == "0"
+    assert snapshot["data"]["key_1000"] == "1000"
