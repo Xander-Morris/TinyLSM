@@ -168,6 +168,7 @@ def test_replication_log_survives_leader_restart(tmp_path_factory):
 
 def test_compaction(tmp_path_factory):
     port = 8400
+    _kill_port(port)
     url = f"http://localhost:{port}"
     data_dir = tmp_path_factory.mktemp("compaction")
 
