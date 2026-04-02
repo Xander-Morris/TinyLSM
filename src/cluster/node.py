@@ -42,6 +42,18 @@ def _write_snapshot(index, data):
     with open(SNAPSHOT_FILE, 'w') as f:
         f.write(json.dumps({"index": index, "data": data}))
 
+def _load_snapshot_from_disk():
+    global log_index 
+
+    try:
+        with open(SNAPSHOT_FILE, 'r') as f: 
+            state = json.loads(f.read())
+            for key, value in state["data"].items(): 
+                store.set(key, value)
+            log_index = state["index"]
+    except FileNotFoundError:
+        pass 
+
 def _load_state_from_disk():
     global term, voted_for
 
