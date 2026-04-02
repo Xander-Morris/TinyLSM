@@ -121,6 +121,8 @@ def _send_heartbeats():
         time.sleep(0.15)
 
 def _start_election():
+    global term, voted_for, LEADER
+
     def _send_vote_requests_to_all_other_nodes(vote_term, prevote=False):
         votes = 1
         vote_lock = threading.Lock()
@@ -150,7 +152,6 @@ def _start_election():
     if not _send_vote_requests_to_all_other_nodes(term + 1, prevote=True):
         return
 
-    global term, voted_for
     with _vote_lock:
         term += 1
         voted_for = my_url
@@ -158,7 +159,6 @@ def _start_election():
     _write_to_state()
 
     if _send_vote_requests_to_all_other_nodes(my_term) and term == my_term:
-        global LEADER
         LEADER = my_url
         threading.Thread(target=_send_heartbeats, daemon=True).start()
 
