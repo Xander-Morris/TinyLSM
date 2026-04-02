@@ -32,6 +32,7 @@ port = None
 my_url = None
 log = []  # List containing elements with {"index": int, "operation": str, "key": str, "value": str}.
 log_index = 0
+snapshot_index = 0
 term = 0
 voted_for = None
 last_heartbeat = time.time()
@@ -39,11 +40,14 @@ follower_indices = {}  # {node_url: last_known_log_index}
 _vote_lock = threading.Lock()
 
 def _write_snapshot(index, data):
+    global snapshot_index
+
     with open(SNAPSHOT_FILE, 'w') as f:
         f.write(json.dumps({"index": index, "data": data}))
+        snapshot_index = index 
 
 def _load_snapshot_from_disk():
-    global log_index 
+    global log_index, snapshot_index
 
     try:
         with open(SNAPSHOT_FILE, 'r') as f: 
@@ -51,6 +55,7 @@ def _load_snapshot_from_disk():
             for key, value in state["data"].items(): 
                 store.set(key, value)
             log_index = state["index"]
+            snapshot_index = log_index 
     except FileNotFoundError:
         pass 
 
@@ -242,7 +247,10 @@ def get(key: str):
 
 @app.get("/sync")
 def sync(from_index: int):
-    return {"entries": log[from_index:]}
+    if from_index < log_index:
+        return log, True 
+
+    return {"entries": [e for e in log if e["index"] > from_index]}
 
 @app.post("/set")
 def set(req: SetRequest):
