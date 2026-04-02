@@ -190,3 +190,17 @@ def test_compaction(tmp_path_factory):
     assert snapshot["index"] == 1001
     assert snapshot["data"]["key_0"] == "0"
     assert snapshot["data"]["key_1000"] == "1000"
+
+    proc2 = subprocess.Popen(
+        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
+
+    try:
+        assert requests.get(f"{url}/get", params={"key": "key_0"}, timeout=2).json()["value"] == "0"
+        assert requests.get(f"{url}/get", params={"key": "key_1000"}, timeout=2).json()["value"] == "1000"
+    finally:
+        proc2.terminate()
+        proc2.wait()
