@@ -247,10 +247,14 @@ def get(key: str):
 
 @app.get("/sync")
 def sync(from_index: int):
-    if from_index < log_index:
-        return log, True 
+    if from_index < snapshot_index:
+        # The caller is behind the snapshot, so send the snapshot and the remaining log.
+        snapshot = json.loads(open(SNAPSHOT_FILE).read())
+        entries = [e for e in log if e["index"] > snapshot_index]
 
-    return {"entries": [e for e in log if e["index"] > from_index]}
+        return {"snapshot": snapshot, "entries": entries}
+    else:
+        return {"entries": [e for e in log if e["index"] > from_index]}
 
 @app.post("/set")
 def set(req: SetRequest):
@@ -337,14 +341,23 @@ if __name__ == "__main__":
     if my_url != LEADER:
         try:
             response = requests.get(f"{LEADER}/sync", params={"from_index": log_index})
+            response = response.json()
 
-            for entry in response.json()["entries"]:
-                if entry["operation"] == "set":
-                    store.set(entry["key"], entry["value"])
-                elif entry["operation"] == "delete":
-                    store.delete(entry["key"])
-                log.append(entry)
-                log_index = entry["index"]
+            def _replay(entries_list):
+                global log_index 
+
+                for entry in entries_list:
+                    if entry["operation"] == "set":
+                        store.set(entry["key"], entry["value"])
+                    elif entry["operation"] == "delete":
+                        store.delete(entry["key"])
+                    log.append(entry)
+                    log_index = entry["index"]
+
+            if response["snapshot"]:
+                _replay(response["snapshot"])
+
+            _replay(response["entries"])
         except Exception:
             pass
 
