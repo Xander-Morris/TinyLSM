@@ -355,7 +355,9 @@ if __name__ == "__main__":
                     log_index = entry["index"]
 
             if "snapshot" in response:
-                _replay(response["snapshot"]["data"].items())
+                for key, value in response["snapshot"]["data"].items():
+                    store.set(key, value)
+                log_index = response["snapshot"]["index"]
 
             _replay(response["entries"])
         except Exception:
