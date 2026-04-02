@@ -85,6 +85,7 @@ def _load_log_from_disk():
 
                     if entry["index"] > log_index:
                         log.append(entry)
+                        log_index = entry["index"]
     except FileNotFoundError:
         pass
 
