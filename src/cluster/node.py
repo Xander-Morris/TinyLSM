@@ -199,6 +199,14 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     log.append(entry)
     _append_log_entry(entry)
 
+    if len(log) > 1000:
+        state = store.dump()
+        _write_snapshot(log_index, state)
+        log = []
+
+        with open(REPLICATION_LOG_FILE, 'w') as f:
+            f.write("")
+
     successes = 1  # The leader itself counts as 1.
     total_nodes = len(NODES)
     majority = (total_nodes // 2) + 1
