@@ -241,7 +241,10 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
         return {"ok": False, "error": "failed to reach majority"}
 
 @app.get("/get")
-def get(key: str):
+def get(key: str, consistent: bool = False):
+    if consistent and my_url != LEADER:
+        return requests.get(f"{LEADER}/get", params={"key": key, "consistent": True}).json()
+
     value = store.get(key)
     return {"key": key, "value": value}
 
