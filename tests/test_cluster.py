@@ -165,3 +165,20 @@ def test_replication_log_survives_leader_restart(tmp_path_factory):
         proc2.wait()
         follower_proc.terminate()
         follower_proc.wait()
+
+def test_compaction(tmp_path_factory):
+    port = 8400
+    url = f"http://localhost:{port}"
+    data_dir = tmp_path_factory.mktemp("compaction")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
+
+    for i in range(1002):
+        wait_for(lambda: requests.post(f"{url}/set", params={"key": f"set_{i}", "value": f"test"}, timeout=2).status_code == 200)
+
+    
