@@ -329,7 +329,7 @@ def vote(req: VoteRequest):
 
 @app.post("/prevote")
 def prevote(req: VoteRequest):
-    return {"vote_granted": time.time() - last_heartbeat > ELECTION_TIMEOUT}
+    return {"vote_granted": time.time() - last_heartbeat > ELECTION_TIMEOUT * 0.5}
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
