@@ -354,8 +354,8 @@ if __name__ == "__main__":
                     log.append(entry)
                     log_index = entry["index"]
 
-            if response["snapshot"]:
-                _replay(response["snapshot"])
+            if "snapshot" in response:
+                _replay(response["snapshot"]["data"].items)
 
             _replay(response["entries"])
         except Exception:
