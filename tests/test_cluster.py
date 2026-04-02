@@ -6,6 +6,7 @@ import sys
 import os
 import json 
 from utils import wait_for
+from src.cluster import node as node 
 
 def _kill_port(port):
     """Kill any process listening on the given port (Windows)."""
@@ -177,7 +178,7 @@ def test_compaction(tmp_path_factory):
     )
     wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
 
-    for i in range(1002):
+    for i in range(node.COMPACTION_THRESHOLD + 2):
         requests.post(f"{url}/set", json={"key": f"key_{i}", "value": str(i)}, timeout=5)
 
     proc.terminate()
@@ -187,9 +188,9 @@ def test_compaction(tmp_path_factory):
     assert snapshot_path.exists()
 
     snapshot = json.loads(snapshot_path.read_text())
-    assert snapshot["index"] == 1001
+    assert snapshot["index"] == node.COMPACTION_THRESHOLD + 1
     assert snapshot["data"]["key_0"] == "0"
-    assert snapshot["data"]["key_1000"] == "1000"
+    assert snapshot["data"][f"key_{node.COMPACTION_THRESHOLD}"] == str(node.COMPACTION_THRESHOLD)
 
     proc2 = subprocess.Popen(
         [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
@@ -200,7 +201,7 @@ def test_compaction(tmp_path_factory):
 
     try:
         assert requests.get(f"{url}/get", params={"key": "key_0"}, timeout=2).json()["value"] == "0"
-        assert requests.get(f"{url}/get", params={"key": "key_1000"}, timeout=2).json()["value"] == "1000"
+        assert requests.get(f"{url}/get", params={"key": f"key_{node.COMPACTION_THRESHOLD}"}, timeout=2).json()["value"] == str(node.COMPACTION_THRESHOLD)
     finally:
         proc2.terminate()
         proc2.wait()

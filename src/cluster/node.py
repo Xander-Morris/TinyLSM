@@ -17,6 +17,7 @@ import src.classes.kv_store as kv_store
 REPLICATION_LOG_FILE = "replication.log"
 STATE_FILE = "state.json"
 SNAPSHOT_FILE = "snapshot.json"
+COMPACTION_THRESHOLD = 50
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -204,7 +205,7 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     log.append(entry)
     _append_log_entry(entry)
 
-    if len(log) > 1000:
+    if len(log) > COMPACTION_THRESHOLD:
         state = store.dump()
         _write_snapshot(log_index, state)
         log.clear()
