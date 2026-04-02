@@ -181,4 +181,5 @@ def test_compaction(tmp_path_factory):
     for i in range(1002):
         wait_for(lambda: requests.post(f"{url}/set", params={"key": f"set_{i}", "value": f"test"}, timeout=2).status_code == 200)
 
-    
+    proc.terminate()
+    proc.wait()
