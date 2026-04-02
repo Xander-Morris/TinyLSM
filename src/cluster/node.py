@@ -202,7 +202,7 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     if len(log) > 1000:
         state = store.dump()
         _write_snapshot(log_index, state)
-        log = []
+        log.clear()
 
         with open(REPLICATION_LOG_FILE, 'w') as f:
             f.write("")
