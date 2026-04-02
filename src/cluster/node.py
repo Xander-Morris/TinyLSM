@@ -10,6 +10,7 @@ import requests
 from typing import Literal
 import time
 import threading
+from src import config as config 
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
@@ -17,7 +18,6 @@ import src.classes.kv_store as kv_store
 REPLICATION_LOG_FILE = "replication.log"
 STATE_FILE = "state.json"
 SNAPSHOT_FILE = "snapshot.json"
-COMPACTION_THRESHOLD = 50
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -205,7 +205,7 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
     log.append(entry)
     _append_log_entry(entry)
 
-    if len(log) > COMPACTION_THRESHOLD:
+    if len(log) > config.LOG_COMPACTION_THRESHOLD:
         state = store.dump()
         _write_snapshot(log_index, state)
         log.clear()

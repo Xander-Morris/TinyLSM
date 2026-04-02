@@ -48,6 +48,7 @@ HASH_FUNCTIONS=5                   # number of hash functions used by bloom filt
 SPARSE_INDEX_N=4                   # sample every Nth key for the sparse index
 WAL_BUFFER_SIZE=100                # number of writes before WAL is flushed to disk
 TOMBSTONE_VALUE="__TOMBSTONE__"
+LOG_COMPACTION_THRESHOLD=10000     # replication log entries before a snapshot is taken and the log is truncated
 BENCHMARK_N=100000                 # number of operations to run in the benchmark
 ```
 
