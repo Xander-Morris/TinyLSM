@@ -16,6 +16,7 @@ import src.classes.kv_store as kv_store
 
 REPLICATION_LOG_FILE = "replication.log"
 STATE_FILE = "state.json"
+SNAPSHOT_FILE = "snapshot.json"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +37,10 @@ voted_for = None
 last_heartbeat = time.time()
 follower_indices = {}  # {node_url: last_known_log_index}
 _vote_lock = threading.Lock()
+
+def _write_snapshot(index, data):
+    with open(SNAPSHOT_FILE, 'w') as f:
+        f.write(json.dumps({"index": index, "data": data}))
 
 def _load_state_from_disk():
     global term, voted_for
