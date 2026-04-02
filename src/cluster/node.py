@@ -121,6 +121,54 @@ def _send_heartbeats():
         time.sleep(0.15)
 
 def _start_election():
+    def _send_vote_requests_to_all_other_nodes(prevote=False):
+        vote_lock = threading.Lock()
+        threads = []
+
+        def _request_vote(node_url):
+            nonlocal votes
+            vote_lock = threading.Lock()
+            threads = []
+
+            try:
+                s = f"{node_url}/vote" if not prevote else f"{node_url}/prevote"
+                response = requests.post(s, json={"candidate_url": my_url, "term": my_term}, timeout=0.2)
+
+                if response.json().get("vote_granted"):
+                    with vote_lock:
+                        votes += 1
+            except Exception:
+                pass
+
+            for node_url in NODES:
+                if node_url != my_url:
+                    t = threading.Thread(target=_request_vote, args=(node_url,))
+                    t.start()
+                    threads.append(t)
+
+            for t in threads:
+                t.join()
+
+        total_nodes = len(NODES)
+        majority = (total_nodes // 2) + 1
+
+        if votes >= majority and term == my_term:
+            if not prevote:
+                global LEADER
+                LEADER = my_url
+                threading.Thread(target=_send_heartbeats, daemon=True).start()
+
+                return True
+            else:
+                return True 
+        
+        return False 
+
+    passed_prevote = _send_vote_requests_to_all_other_nodes(True)
+
+    if not passed_prevote: 
+        return 
+
     global term, voted_for
     with _vote_lock:
         term += 1
@@ -128,36 +176,7 @@ def _start_election():
     my_term = term
     votes = 1
     _write_to_state()
-
-    vote_lock = threading.Lock()
-    threads = []
-
-    def request_vote(node_url):
-        nonlocal votes
-        try:
-            response = requests.post(f"{node_url}/vote", json={"candidate_url": my_url, "term": my_term}, timeout=0.2)
-            if response.json().get("vote_granted"):
-                with vote_lock:
-                    votes += 1
-        except Exception:
-            pass
-
-    for node_url in NODES:
-        if node_url != my_url:
-            t = threading.Thread(target=request_vote, args=(node_url,))
-            t.start()
-            threads.append(t)
-
-    for t in threads:
-        t.join()
-
-    total_nodes = len(NODES)
-    majority = (total_nodes // 2) + 1
-
-    if votes >= majority and term == my_term:
-        global LEADER
-        LEADER = my_url
-        threading.Thread(target=_send_heartbeats, daemon=True).start()
+    _send_vote_requests_to_all_other_nodes(False)
 
 class SetRequest(BaseModel):
     key: str
@@ -312,14 +331,21 @@ def status():
 @app.post("/vote")
 def vote(req: VoteRequest):
     global term, voted_for, last_heartbeat
+
     with _vote_lock:
         if req.term > term or (req.term == term and (voted_for is None or voted_for == req.candidate_url)):
             term = req.term
             voted_for = req.candidate_url
             last_heartbeat = time.time()
             _write_to_state()
+
             return {"vote_granted": True}
+        
     return {"vote_granted": False}
+
+@app.post("/prevote")
+def prevote(req: VoteRequest):
+    return {"vote_granted": time.time() - last_heartbeat > ELECTION_TIMEOUT}
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
