@@ -79,10 +79,12 @@ def _load_log_from_disk():
         with open(REPLICATION_LOG_FILE, 'r') as f:
             for line in f:
                 line = line.strip()
+
                 if line:
                     entry = json.loads(line)
-                    log.append(entry)
-                    log_index = entry["index"]
+
+                    if entry["index"] > log_index:
+                        log.append(entry)
     except FileNotFoundError:
         pass
 
@@ -310,6 +312,7 @@ if __name__ == "__main__":
     store = kv_store.KVStore()
     my_url = f"http://localhost:{port}"
 
+    _load_snapshot_from_disk()
     _load_log_from_disk()
     _load_state_from_disk()
 
