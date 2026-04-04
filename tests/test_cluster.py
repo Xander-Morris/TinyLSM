@@ -232,9 +232,10 @@ def test_add_node(tmp_path_factory):
     assert ok, "Initial 2-node cluster did not stabilize"
 
     new_url = f"http://localhost:{ports[2]}"
+    all_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]},{new_url}"
     new_dir = tmp_path_factory.mktemp(f"add_node_{ports[2]}")
     procs[ports[2]] = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(ports[2]), str(new_dir), leader_url, new_url],
+        [sys.executable, "-m", "src.cluster.node", str(ports[2]), str(new_dir), leader_url, all_nodes],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
