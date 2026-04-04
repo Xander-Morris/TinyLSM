@@ -184,6 +184,9 @@ class HeartbeatRequest(BaseModel):
     term: int
     entries: list = []
 
+class AddNodeRequest(BaseModel):
+    node_url: str
+
 def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None = None):
     if operation != "set" and operation != "delete":
         return {"ok": False}
@@ -330,6 +333,13 @@ def vote(req: VoteRequest):
 @app.post("/prevote")
 def prevote(req: VoteRequest):
     return {"vote_granted": time.time() - last_heartbeat > ELECTION_TIMEOUT * 0.5}
+
+@app.post("/add_node")
+def add_node(req: AddNodeRequest):
+    if my_url != LEADER: 
+        return 
+
+    NODES.append(req.node_url)
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
