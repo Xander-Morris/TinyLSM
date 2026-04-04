@@ -206,3 +206,51 @@ def test_compaction(tmp_path_factory):
     finally:
         proc2.terminate()
         proc2.wait()
+
+def test_add_node(tmp_path_factory):
+    ports = [8500, 8501, 8502]
+    for port in ports:
+        _kill_port(port)
+
+    leader_url = f"http://localhost:{ports[0]}"
+    two_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]}"
+    procs = {}
+
+    for port in ports[:2]:
+        data_dir = tmp_path_factory.mktemp(f"add_node_{port}")
+        procs[port] = subprocess.Popen(
+            [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader_url, two_nodes],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    for port in ports[:2]:
+        ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
+        assert ok, f"Node on port {port} did not start in time"
+
+    ok = wait_for(lambda: len(set(requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports[:2])) == 1, timeout=10.0)
+    assert ok, "Initial 2-node cluster did not stabilize"
+
+    new_url = f"http://localhost:{ports[2]}"
+    new_dir = tmp_path_factory.mktemp(f"add_node_{ports[2]}")
+    procs[ports[2]] = subprocess.Popen(
+        [sys.executable, "-m", "src.cluster.node", str(ports[2]), str(new_dir), leader_url, new_url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
+    assert ok, "New node did not start in time"
+
+    requests.post(f"{leader_url}/add_node", json={"node_url": new_url}, timeout=5)
+
+    ok = wait_for(lambda: len(set(requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports)) == 1, timeout=10.0)
+    assert ok, "Cluster did not stabilize after adding node"
+
+    requests.post(f"{leader_url}/set", json={"key": "after_add", "value": "yes"}, timeout=5)
+
+    ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "after_add"}, timeout=2).json().get("value") == "yes", timeout=10.0)
+    assert ok, "New node did not receive replicated write"
+
+    for proc in procs.values():
+        proc.terminate()
+        proc.wait()
