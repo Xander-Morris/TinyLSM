@@ -187,7 +187,7 @@ class HeartbeatRequest(BaseModel):
 class AddNodeRequest(BaseModel):
     node_url: str
 
-def do_replicated_operation(operation: Literal["set", "delete"], key: str, value: str | None = None):
+def do_replicated_operation(operation: Literal["set", "delete", "add_node"], key: str, value: str | None = None):
     if operation != "set" and operation != "delete":
         return {"ok": False}
     
@@ -204,6 +204,8 @@ def do_replicated_operation(operation: Literal["set", "delete"], key: str, value
         store.set(key, value)
     elif operation == "delete":
         store.delete(key)
+    elif operation == "add_node":
+        NODES.append(key) # "key" is used as the "node_url" here
 
     global log_index
     log_index += 1
@@ -274,6 +276,10 @@ def set(req: SetRequest):
 def delete(req: DeleteRequest):
     return do_replicated_operation("delete", req.key)
 
+@app.post("/add_node")
+def add_node(req: AddNodeRequest):
+    return do_replicated_operation("add_node", req.node_url)
+
 @app.post("/heartbeat")
 def heartbeat(req: HeartbeatRequest):
     global last_heartbeat, LEADER, term, log_index
@@ -303,6 +309,8 @@ def replicate(req: ReplicateRequest):
         store.set(req.key, req.value)
     elif req.operation == "delete":
         store.delete(req.key)
+    elif req.operation == "add_node": 
+        NODES.append(req.key) 
 
     log_index = req.index
     entry = {"index": req.index, "operation": req.operation, "key": req.key, "value": req.value}
@@ -333,15 +341,6 @@ def vote(req: VoteRequest):
 @app.post("/prevote")
 def prevote(req: VoteRequest):
     return {"vote_granted": time.time() - last_heartbeat > ELECTION_TIMEOUT * 0.5}
-
-@app.post("/add_node")
-def add_node(req: AddNodeRequest):
-    if my_url != LEADER: 
-        return req.post(f"{LEADER}/add_node", params={"node_url": req.node_url}).json() 
-
-    NODES.append(req.node_url)
-
-    return {"node_added": True}
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
