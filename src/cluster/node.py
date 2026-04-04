@@ -337,9 +337,11 @@ def prevote(req: VoteRequest):
 @app.post("/add_node")
 def add_node(req: AddNodeRequest):
     if my_url != LEADER: 
-        return 
+        return req.post(f"{LEADER}/add_node", params={"node_url": req.node_url}).json() 
 
     NODES.append(req.node_url)
+
+    return {"node_added": True}
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
