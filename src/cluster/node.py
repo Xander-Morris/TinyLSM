@@ -188,7 +188,7 @@ class AddNodeRequest(BaseModel):
     node_url: str
 
 def do_replicated_operation(operation: Literal["set", "delete", "add_node"], key: str, value: str | None = None):
-    if operation != "set" and operation != "delete":
+    if operation not in ("set", "delete", "add_node"):
         return {"ok": False}
     
     json_tbl = {"key": key}
