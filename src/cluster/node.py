@@ -184,11 +184,11 @@ class HeartbeatRequest(BaseModel):
     term: int
     entries: list = []
 
-class AddNodeRequest(BaseModel):
+class NodeRequest(BaseModel):
     node_url: str
 
-def do_replicated_operation(operation: Literal["set", "delete", "add_node"], key: str, value: str | None = None):
-    if operation not in ("set", "delete", "add_node"):
+def do_replicated_operation(operation: Literal["set", "delete", "add_node", "remove_node"], key: str, value: str | None = None):
+    if operation not in ("set", "delete", "add_node", "remove_node"):
         return {"ok": False}
     
     json_tbl = {"key": key}
@@ -206,6 +206,8 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node"], key
         store.delete(key)
     elif operation == "add_node":
         NODES.append(key) # "key" is used as the "node_url" here
+    elif operation == "remove_node":
+        NODES.remove(key) # "key" is used as the "node_url" here
 
     global log_index
     log_index += 1
@@ -277,8 +279,12 @@ def delete(req: DeleteRequest):
     return do_replicated_operation("delete", req.key)
 
 @app.post("/add_node")
-def add_node(req: AddNodeRequest):
+def add_node(req: NodeRequest):
     return do_replicated_operation("add_node", req.node_url)
+
+@app.post("/remove_node")
+def add_node(req: NodeRequest):
+    return do_replicated_operation("remove_node", req.node_url)
 
 @app.post("/heartbeat")
 def heartbeat(req: HeartbeatRequest):
@@ -311,6 +317,8 @@ def replicate(req: ReplicateRequest):
         store.delete(req.key)
     elif req.operation == "add_node": 
         NODES.append(req.key) 
+    elif req.operation == "remove_node":
+        NODES.remove(req.key)
 
     log_index = req.index
     entry = {"index": req.index, "operation": req.operation, "key": req.key, "value": req.value}
