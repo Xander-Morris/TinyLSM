@@ -283,7 +283,7 @@ def add_node(req: NodeRequest):
     return do_replicated_operation("add_node", req.node_url)
 
 @app.post("/remove_node")
-def add_node(req: NodeRequest):
+def remove_node(req: NodeRequest):
     return do_replicated_operation("remove_node", req.node_url)
 
 @app.post("/heartbeat")
