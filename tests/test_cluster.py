@@ -4,12 +4,11 @@ import time
 import requests
 import sys
 import os
-import json 
+import json
 from utils import wait_for
-from src import config as config 
+from src import config as config
 
 def _kill_port(port):
-    """Kill any process listening on the given port (Windows)."""
     result = subprocess.run(
         f'netstat -ano | findstr ":{port}" | findstr "LISTENING"',
         shell=True, capture_output=True, text=True,
@@ -19,6 +18,20 @@ def _kill_port(port):
         if parts:
             subprocess.run(f"taskkill /F /PID {parts[-1]}", shell=True, capture_output=True)
     time.sleep(0.3)
+
+def _start_node(port, data_dir, leader_url, nodes_str):
+    return subprocess.Popen(
+        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader_url, nodes_str],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+def _wait_healthy(port, timeout=15.0):
+    return wait_for(lambda: requests.get(f"http://localhost:{port}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=timeout)
+
+def _all_agree(ports):
+    leaders = [requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports]
+    return len(set(leaders)) == 1 and all(leaders)
 
 @pytest.fixture(scope="module")
 def cluster(tmp_path_factory):
@@ -33,23 +46,12 @@ def cluster(tmp_path_factory):
 
         for port in ports:
             data_dir = tmp_path_factory.mktemp(f"node_{port}")
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader, nodes],
-                stdout=subprocess.DEVNULL,
-                stderr=None,
-            )
-            procs.append(proc)
+            procs.append(_start_node(port, data_dir, leader, nodes))
 
         for port in ports:
-            ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
-            assert ok, f"Node on port {port} did not start in time"
+            assert _wait_healthy(port), f"Node on port {port} did not start in time"
 
-        def cluster_stable():
-            statuses = [requests.get(f"http://localhost:{p}/status", timeout=2).json() for p in ports]
-            leaders = [s["leader"] for s in statuses]
-            return len(set(leaders)) == 1 and all(leaders)
-
-        ok = wait_for(cluster_stable, timeout=10.0)
+        ok = wait_for(lambda: _all_agree(ports), timeout=10.0)
         if not ok:
             for p in ports:
                 try:
@@ -111,11 +113,7 @@ def test_catchup_after_restart(cluster, tmp_path_factory):
     data_dir = tmp_path_factory.mktemp("node_8103")
     leader = f"http://localhost:{ports[0]}"
     nodes = ",".join(f"http://localhost:{p}" for p in ports + [port])
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader, nodes],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    proc = _start_node(port, data_dir, leader, nodes)
     wait_for(lambda: requests.get(f"http://localhost:{port}/get", params={"key": "missed_write"}, timeout=2).json()["value"] == "2", timeout=5.0)
     assert requests.get(f"http://localhost:{port}/get", params={"key": "missed_write"}, timeout=2).json()["value"] == "2"
     proc.terminate()
@@ -126,35 +124,20 @@ def test_replication_log_survives_leader_restart(tmp_path_factory):
     url = f"http://localhost:{port}"
     data_dir = tmp_path_factory.mktemp("persist_leader")
 
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    proc = _start_node(port, data_dir, url, url)
     wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
     requests.post(f"{url}/set", json={"key": "alpha", "value": "1"}, timeout=5)
     requests.post(f"{url}/set", json={"key": "beta", "value": "2"}, timeout=5)
-
     proc.terminate()
     proc.wait()
 
-    proc2 = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    proc2 = _start_node(port, data_dir, url, url)
     wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
 
     follower_port = 8201
     follower_url = f"http://localhost:{follower_port}"
     follower_dir = tmp_path_factory.mktemp("persist_follower")
-    follower_nodes = f"{url},{follower_url}"
-
-    follower_proc = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(follower_port), str(follower_dir), url, follower_nodes],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    follower_proc = _start_node(follower_port, follower_dir, url, f"{url},{follower_url}")
 
     try:
         wait_for(lambda: requests.get(f"{follower_url}/get", params={"key": "alpha"}, timeout=2).json()["value"] == "1", timeout=5.0)
@@ -172,11 +155,7 @@ def test_compaction(tmp_path_factory):
     url = f"http://localhost:{port}"
     data_dir = tmp_path_factory.mktemp("compaction")
 
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    proc = _start_node(port, data_dir, url, url)
     wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
 
     for i in range(config.LOG_COMPACTION_THRESHOLD + 2):
@@ -193,11 +172,7 @@ def test_compaction(tmp_path_factory):
     assert snapshot["data"]["key_0"] == "0"
     assert snapshot["data"][f"key_{config.LOG_COMPACTION_THRESHOLD}"] == str(config.LOG_COMPACTION_THRESHOLD)
 
-    proc2 = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), url, url],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    proc2 = _start_node(port, data_dir, url, url)
     wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
 
     try:
@@ -207,110 +182,68 @@ def test_compaction(tmp_path_factory):
         proc2.terminate()
         proc2.wait()
 
+def _start_three_node_cluster(tmp_path_factory, ports, prefix):
+    leader_url = f"http://localhost:{ports[0]}"
+    two_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]}"
+    all_nodes = ",".join(f"http://localhost:{p}" for p in ports)
+    procs = {}
+
+    for port in ports[:2]:
+        data_dir = tmp_path_factory.mktemp(f"{prefix}_{port}")
+        procs[port] = _start_node(port, data_dir, leader_url, two_nodes)
+
+    for port in ports[:2]:
+        assert _wait_healthy(port), f"Node on port {port} did not start in time"
+
+    assert wait_for(lambda: _all_agree(ports[:2]), timeout=10.0), "Initial 2-node cluster did not stabilize"
+
+    new_url = f"http://localhost:{ports[2]}"
+    new_dir = tmp_path_factory.mktemp(f"{prefix}_{ports[2]}")
+    procs[ports[2]] = _start_node(ports[2], new_dir, leader_url, all_nodes)
+    assert _wait_healthy(ports[2]), "New node did not start in time"
+
+    requests.post(f"{leader_url}/add_node", json={"node_url": new_url}, timeout=5)
+    assert wait_for(lambda: _all_agree(ports), timeout=10.0), "Cluster did not stabilize after adding node"
+
+    return procs, leader_url, new_url
+
 def test_add_node(tmp_path_factory):
     ports = [8500, 8501, 8502]
     for port in ports:
         _kill_port(port)
 
-    leader_url = f"http://localhost:{ports[0]}"
-    two_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]}"
-    procs = {}
+    procs, leader_url, new_url = _start_three_node_cluster(tmp_path_factory, ports, "add_node")
 
-    for port in ports[:2]:
-        data_dir = tmp_path_factory.mktemp(f"add_node_{port}")
-        procs[port] = subprocess.Popen(
-            [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader_url, two_nodes],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-    for port in ports[:2]:
-        ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
-        assert ok, f"Node on port {port} did not start in time"
-
-    ok = wait_for(lambda: len(set(requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports[:2])) == 1, timeout=10.0)
-    assert ok, "Initial 2-node cluster did not stabilize"
-
-    new_url = f"http://localhost:{ports[2]}"
-    all_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]},{new_url}"
-    new_dir = tmp_path_factory.mktemp(f"add_node_{ports[2]}")
-    procs[ports[2]] = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(ports[2]), str(new_dir), leader_url, all_nodes],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
-    assert ok, "New node did not start in time"
-
-    requests.post(f"{leader_url}/add_node", json={"node_url": new_url}, timeout=5)
-
-    ok = wait_for(lambda: len(set(requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports)) == 1, timeout=10.0)
-    assert ok, "Cluster did not stabilize after adding node"
-
-    requests.post(f"{leader_url}/set", json={"key": "after_add", "value": "yes"}, timeout=5)
-
-    ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "after_add"}, timeout=2).json().get("value") == "yes", timeout=10.0)
-    assert ok, "New node did not receive replicated write"
-
-    for proc in procs.values():
-        proc.terminate()
-        proc.wait()
+    try:
+        requests.post(f"{leader_url}/set", json={"key": "after_add", "value": "yes"}, timeout=5)
+        ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "after_add"}, timeout=2).json().get("value") == "yes", timeout=10.0)
+        assert ok, "New node did not receive replicated write"
+    finally:
+        for proc in procs.values():
+            proc.terminate()
+            proc.wait()
 
 def test_remove_node(tmp_path_factory):
     ports = [8500, 8501, 8502]
     for port in ports:
         _kill_port(port)
 
-    leader_url = f"http://localhost:{ports[0]}"
-    two_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]}"
-    procs = {}
+    procs, leader_url, new_url = _start_three_node_cluster(tmp_path_factory, ports, "remove_node")
 
-    for port in ports[:2]:
-        data_dir = tmp_path_factory.mktemp(f"add_node_{port}")
-        procs[port] = subprocess.Popen(
-            [sys.executable, "-m", "src.cluster.node", str(port), str(data_dir), leader_url, two_nodes],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    try:
+        requests.post(f"{leader_url}/set", json={"key": "after_add", "value": "yes"}, timeout=5)
+        ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "after_add"}, timeout=2).json().get("value") == "yes", timeout=10.0)
+        assert ok, "New node did not receive replicated write"
 
-    for port in ports[:2]:
-        ok = wait_for(lambda p=port: requests.get(f"http://localhost:{p}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
-        assert ok, f"Node on port {port} did not start in time"
+        requests.post(f"{leader_url}/remove_node", json={"node_url": new_url}, timeout=5)
+        procs[ports[2]].terminate()
+        procs[ports[2]].wait()
 
-    ok = wait_for(lambda: len(set(requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports[:2])) == 1, timeout=10.0)
-    assert ok, "Initial 2-node cluster did not stabilize"
+        assert wait_for(lambda: _all_agree(ports[:2]), timeout=10.0), "2-node cluster did not stabilize after removal"
 
-    new_url = f"http://localhost:{ports[2]}"
-    all_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]},{new_url}"
-    new_dir = tmp_path_factory.mktemp(f"add_node_{ports[2]}")
-    procs[ports[2]] = subprocess.Popen(
-        [sys.executable, "-m", "src.cluster.node", str(ports[2]), str(new_dir), leader_url, all_nodes],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
-    assert ok, "New node did not start in time"
-
-    requests.post(f"{leader_url}/add_node", json={"node_url": new_url}, timeout=5)
-
-    ok = wait_for(lambda: len(set(requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports)) == 1, timeout=10.0)
-    assert ok, "Cluster did not stabilize after adding node"
-
-    requests.post(f"{leader_url}/set", json={"key": "after_add", "value": "yes"}, timeout=5)
-
-    ok = wait_for(lambda: requests.get(f"{new_url}/get", params={"key": "after_add"}, timeout=2).json().get("value") == "yes", timeout=10.0)
-    assert ok, "New node did not receive replicated write"
-
-    requests.post(f"{leader_url}/remove_node", json={"node_url": new_url}, timeout=5)
-    procs[ports[2]].terminate()
-    procs[ports[2]].wait()
-
-    ok = wait_for(lambda: len(set(requests.get(f"http://localhost:{p}/status", timeout=2).json()["leader"] for p in ports[:2])) == 1, timeout=10.0)
-    assert ok, "2-node cluster did not stabilize after removal"
-
-    result = requests.post(f"{leader_url}/set", json={"key": "after_remove", "value": "yes"}, timeout=5)
-    assert result.json().get("ok") is True, "Write failed after node removal"
-
-    for port in ports[:2]:
-        procs[port].terminate()
-        procs[port].wait()
+        result = requests.post(f"{leader_url}/set", json={"key": "after_remove", "value": "yes"}, timeout=5)
+        assert result.json().get("ok") is True, "Write failed after node removal"
+    finally:
+        for port in ports[:2]:
+            procs[port].terminate()
+            procs[port].wait()
