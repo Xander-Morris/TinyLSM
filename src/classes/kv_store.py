@@ -139,18 +139,6 @@ class KVStore:
         return offset 
 
     @staticmethod 
-    def _sstable_iter(index):
-        with open(f"sst_{index}", 'r') as file: 
-            for line in file: 
-                key, seq, value = KVStore._parse_sstable_line(line.strip())
-                """ 
-                    I use yield here to pause and hand the value back to the caller instead of building
-                    all the lines and returning them. If I want only 5 lines for some reason,
-                    then I can do that with this yielding method.
-                """
-                yield (key, seq, value)
-
-    @staticmethod 
     def _sstable_iter_from(index, sparse_index, start_key):
         offset = KVStore._search_sparse_index_for_key_offset(sparse_index, start_key)
 
