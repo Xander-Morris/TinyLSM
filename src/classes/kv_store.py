@@ -515,7 +515,9 @@ class KVStore:
                 return val != config.TOMBSTONE_VALUE and (at is None or seq <= at)
 
             for key, seq, value in heapq.merge(*sources):
-                if key < start or key > end:
+                if key > end:
+                    break
+                if key < start:
                     continue
                 if key != seen_key:
                     if seen_key is not None and should_yield(best_value, best_seq):
