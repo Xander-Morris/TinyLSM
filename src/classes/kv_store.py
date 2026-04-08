@@ -107,17 +107,6 @@ class KVStore:
         versions = entries.get(key)
         
         return KVStore._pick_version(versions, at)
-    
-    @staticmethod 
-    def _gather_entries_from_table_at(entries, lst, start: str, end: str, at=None):
-        for key, versions in lst.items():
-            if key >= start and key <= end:
-                value = KVStore._pick_version(versions, at)
-
-                if value == config.TOMBSTONE_VALUE:
-                    entries.pop(key, None)
-                elif value is not None:
-                    entries[key] = value
 
     @staticmethod 
     def _search_sparse_index_for_key_offset(sparse_index, key):
