@@ -1,6 +1,6 @@
 # TinyLSM
 
-I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, snapshot reads via MVCC, and an immutable memtable for non-blocking flushes. It also includes a distributed key-value layer built on top of the storage engine, with leader/follower replication, quorum writes, follower catch-up sync, and a persistent replication log that survives leader restarts.
+I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, snapshot reads via MVCC, and an immutable memtable for non-blocking flushes. It also includes a distributed key-value layer built on top of the storage engine, with Raft-style leader election, quorum writes, follower catch-up via heartbeat, a persistent replication log, log compaction with snapshotting, consistent reads, and dynamic membership changes.
 
 ## How to Run
 
@@ -24,7 +24,7 @@ python -m src.cluster.node 8002 data/node2 http://localhost:8000 http://localhos
 
 Arguments: `<port> <data_dir> <leader_url> <comma_separated_node_urls>`
 
-The first node is the leader. Writes go to any node and are forwarded to the leader, which replicates to all followers and requires a majority to acknowledge before returning success.
+The first argument is the configured initial leader. A new leader is elected automatically if the current leader fails. Writes go to any node and are forwarded to the leader, which replicates to all followers and requires a majority to acknowledge before returning success.
 
 Once running, the REPL accepts the following commands:
 
@@ -91,13 +91,19 @@ Deletes write a tombstone marker instead of removing data immediately, since the
 
 ### Distributed Key-Value Layer
 
-The LSM-tree is wrapped in a FastAPI HTTP server. A cluster is a fixed set of nodes with one designated leader. The leader accepts writes, applies them locally, then replicates to all followers. A write is acknowledged to the caller only after a majority of nodes confirm it, so the cluster can tolerate up to `floor(n/2)` node failures without losing writes. Followers that are behind can request the full operation history from the leader via `/sync` and replay it to catch up.
+The LSM-tree is wrapped in a FastAPI HTTP server. A cluster has one leader at a time, elected via a Raft-style protocol with randomized timeouts and a pre-vote phase to prevent term inflation from partitioned nodes. The leader accepts writes, applies them locally, then replicates to all followers in parallel. A write is acknowledged to the caller only after a majority of nodes confirm it, so the cluster can tolerate up to `floor(n/2)` node failures without losing writes.
 
-A write to a follower is forwarded transparently to the leader, so the caller does not need to know which node is the leader.
+A write to a follower is forwarded transparently to the leader. A consistent read (`GET /get?key=k&consistent=true`) is also forwarded to the leader to avoid returning stale data.
 
-### Persistent Replication Log
+Followers that fall behind are caught up via heartbeat: the leader tracks each follower's log index and includes any missing entries in the next heartbeat. A new node joining the cluster can also pull the full history from the leader via `/sync` at startup.
 
-Every write the leader processes is appended to an on-disk replication log (`replication.log`) in the leader's data directory. On startup, the leader reads this file back and reconstructs its in-memory log before accepting connections. This means a new or restarted follower can always sync the complete history from the leader, even after the leader has been restarted. Without this, a leader restart would wipe the in-memory log and leave any new followers unable to catch up to writes that happened before the restart.
+Nodes can be added or removed at runtime via `/add_node` and `/remove_node`. Membership changes are replicated through the log so all nodes apply them at the same point.
+
+### Persistent Replication Log and Snapshots
+
+Every write the leader processes is appended to an on-disk replication log (`replication.log`) in the node's data directory. On startup, the node reads this file back and reconstructs its in-memory log before accepting connections. This means a restarted node can rejoin the cluster and serve reads immediately.
+
+Once the log exceeds `LOG_COMPACTION_THRESHOLD` entries, the node takes a snapshot: it serializes the full current KV state to `snapshot.json`, then truncates the replication log. On the next startup, the node loads the snapshot first and only replays log entries that came after it. This keeps startup time and memory usage bounded regardless of how long the cluster has been running. When a joining node is too far behind the snapshot, `/sync` sends the snapshot directly instead of individual log entries.
 
 ### CRC Checksums
 Each SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and if it doesn't match a `ValueError` is raised right away instead of returning bad data.
