@@ -120,6 +120,25 @@ class KVStore:
                     entries[key] = value
 
     @staticmethod 
+    def _search_sparse_index_for_key_offset(sparse_index, key):
+        low = 0
+        high = len(sparse_index) - 1
+        found = False
+
+        while low <= high:
+            mid = (low + high) // 2
+
+            if sparse_index[mid][0] <= key: 
+                low = mid + 1 
+                found = True
+            else:
+                high = mid - 1
+        
+        offset = sparse_index[low - 1][1] if found else 0
+
+        return offset 
+
+    @staticmethod 
     def _sstable_iter(index):
         with open(f"sst_{index}", 'r') as file: 
             for line in file: 
@@ -372,20 +391,7 @@ class KVStore:
             print(f"No sparse index exists in the sparse_indexes dictionary for {index}!")
             return
 
-        low = 0
-        high = len(self._sparse_indexes[index]) - 1
-        found = False
-
-        while low <= high:
-            mid = (low + high) // 2
-
-            if self._sparse_indexes[index][mid][0] <= key: 
-                low = mid + 1 
-                found = True
-            else:
-                high = mid - 1
-        
-        offset = self._sparse_indexes[index][low - 1][1] if found else 0
+        offset = KVStore._search_sparse_index_for_key_offset(self._sparse_indexes[index], key)
         versions = []
 
         with open(f"sst_{index}", 'r') as file: 
