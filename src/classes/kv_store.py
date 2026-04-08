@@ -155,8 +155,13 @@ class KVStore:
         offset = KVStore._search_sparse_index_for_key_offset(sparse_index, start_key)
 
         with open(f"sst_{index}", 'r') as file: 
+            file.seek(offset)
+
             for line in file: 
                 key, seq, value = KVStore._parse_sstable_line(line.strip())
+                
+                if key < start_key:
+                    continue 
                 """ 
                     I use yield here to pause and hand the value back to the caller instead of building
                     all the lines and returning them. If I want only 5 lines for some reason,
@@ -519,7 +524,8 @@ class KVStore:
         with self._lock.read():
             sources = []
             for entry in sorted(self._manifest.entries, key=lambda e: (e["level"], -KVStore._sst_index(e))):
-                sources.append(KVStore._sstable_iter(KVStore._sst_index(entry)))
+                index = KVStore._sst_index(entry)
+                sources.append(KVStore._sstable_iter_from(index, self._sparse_indexes[index], start))
             if self._imm_memtable is not None:
                 sources.append(KVStore._memtable_iter(self._imm_memtable))
             sources.append(KVStore._memtable_iter(self._store))
