@@ -152,6 +152,8 @@ class KVStore:
 
     @staticmethod 
     def _sstable_iter_from(index, sparse_index, start_key):
+        offset = KVStore._search_sparse_index_for_key_offset(sparse_index, start_key)
+
         with open(f"sst_{index}", 'r') as file: 
             for line in file: 
                 key, seq, value = KVStore._parse_sstable_line(line.strip())
