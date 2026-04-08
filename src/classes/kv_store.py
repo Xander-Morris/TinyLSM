@@ -493,25 +493,7 @@ class KVStore:
             return None if raw_value == config.TOMBSTONE_VALUE else raw_value
 
     def scan(self, start: str, end: str, at=None):
-        with self._lock.read():
-            entries = {}
-
-            for entry in self._manifest.entries:
-                index = KVStore._sst_index(entry)
-                tuples = KVStore._build_sstable_tuples(index)
-                sstable_versions = {}
-
-                for key, seq, value in tuples:
-                    if key not in sstable_versions:
-                        sstable_versions[key] = []
-                    sstable_versions[key].append((seq, value))
-
-                self._gather_entries_from_table_at(entries, sstable_versions, start, end, at)
-
-            self._gather_entries_from_table_at(entries, self._imm_memtable or {}, start, end, at)
-            self._gather_entries_from_table_at(entries, self._store, start, end, at)   
-
-            return [(key, entries[key]) for key in sorted(entries)]
+        return list(self.iter(start, end, at))
     
     def iter(self, start: str, end: str, at=None):
         with self._lock.read():
