@@ -121,6 +121,7 @@ def test_catchup_after_restart(cluster, tmp_path_factory):
 
 def test_replication_log_survives_leader_restart(tmp_path_factory):
     port = 8200
+    _kill_port(port)
     url = f"http://localhost:{port}"
     data_dir = tmp_path_factory.mktemp("persist_leader")
 
@@ -156,7 +157,7 @@ def test_compaction(tmp_path_factory):
     data_dir = tmp_path_factory.mktemp("compaction")
 
     proc = _start_node(port, data_dir, url, url)
-    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
+    assert _wait_healthy(port), f"Node on port {port} did not start in time"
 
     for i in range(config.LOG_COMPACTION_THRESHOLD + 2):
         requests.post(f"{url}/set", json={"key": f"key_{i}", "value": str(i)}, timeout=5)
@@ -173,7 +174,7 @@ def test_compaction(tmp_path_factory):
     assert snapshot["data"][f"key_{config.LOG_COMPACTION_THRESHOLD}"] == str(config.LOG_COMPACTION_THRESHOLD)
 
     proc2 = _start_node(port, data_dir, url, url)
-    wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200)
+    assert _wait_healthy(port), f"Node on port {port} did not start in time"
 
     try:
         assert requests.get(f"{url}/get", params={"key": "key_0"}, timeout=2).json()["value"] == "0"
