@@ -169,6 +169,16 @@ python -m src.benchmark
 
 The benchmark script creates a temporary store, runs writes, single-threaded reads, 4-thread reads, and misses, then prints ops/sec for your machine.
 
+Example output with `N=100000`:
+
+```text
+Doing the benchmarks with N=100000...
+Writes: 100000 ops in 0.38s -> 261274 ops/sec
+Reads (1 thread):  100000 ops in 0.25s -> 401483 ops/sec
+Reads (4 threads): 100000 ops in 0.24s -> 425106 ops/sec
+Misses: 100000 ops in 0.92s -> 108694 ops/sec
+```
+
 ## Tests
 
 Run the full test suite with:
