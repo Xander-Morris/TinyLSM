@@ -1,134 +1,211 @@
 # TinyLSM
 
-I built this while reading Designing Data-Intensive Applications to get a better feel for how storage engines actually work. It's an LSM-tree written in Python with SSTables, Bloom filters, leveled compaction, sparse indexing, CRC checksums, atomic manifest writes, concurrent reads via a read-write lock, snapshot reads via MVCC, and an immutable memtable for non-blocking flushes. It also includes a distributed key-value layer built on top of the storage engine, with Raft-style leader election, quorum writes, follower catch-up via heartbeat, a persistent replication log, log compaction with snapshotting, consistent reads, and dynamic membership changes.
+TinyLSM is a small Python key-value store built to explore LSM-tree storage ideas in code. It started as a learning project while reading Designing Data-Intensive Applications, and the repo now includes both a local storage engine and a simple replicated HTTP cluster built on top of it.
 
-## How to Run
+It is not meant to be a production database. It is meant to be readable, hackable, and useful for learning how the pieces fit together.
+
+## What is implemented
+
+- Write-ahead logging
+- Mutable and immutable memtables
+- Background flush to SSTables
+- Bloom filter sidecars
+- Sparse index sidecars
+- Leveled compaction
+- CRC32 checksums on SSTable records
+- Atomic manifest writes with `os.replace`
+- Snapshot reads with sequence numbers
+- Concurrent reads with a read-write lock
+- FastAPI-based multi-node replication with leader election, majority write acknowledgement, follower catch-up, and log snapshots
+
+## Requirements
+
+- Python 3.11 or newer
+
+## Quick Start
 
 ```bash
-python -m venv venv
-venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-python -m src.main       # run the REPL
-python -m src.benchmark  # run benchmarks
-pytest tests/            # run test suite
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+pytest tests
 ```
 
-To run a 3-node cluster locally:
+Run the local REPL:
 
 ```bash
-# In three separate terminals:
-python -m src.cluster.node 8000 data/node0 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
-python -m src.cluster.node 8001 data/node1 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
-python -m src.cluster.node 8002 data/node2 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
+python -m src.main
 ```
 
-Arguments: `<port> <data_dir> <leader_url> <comma_separated_node_urls>`
+Run the benchmark script:
 
-The first argument is the configured initial leader. A new leader is elected automatically if the current leader fails. Writes go to any node and are forwarded to the leader, which replicates to all followers and requires a majority to acknowledge before returning success.
-
-Once running, the REPL accepts the following commands:
-
-```
-SET key value      # write a key-value pair
-GET key            # read a value by key
-DELETE key         # delete a key
-SCAN key1 key2     # return all keys in the range [key1, key2]
-STATS              # print store statistics
-EXIT               # quit
+```bash
+python -m src.benchmark
 ```
 
-Configuration is done through a `.env` file in the project root:
+The standalone store writes data files into the current working directory. For a clean run, use an empty folder or clear old `sst_*`, `manifest.json`, and WAL files before starting again.
 
+## REPL Commands
+
+Once `python -m src.main` is running, these commands are available:
+
+```text
+SET key value
+GET key
+DELETE key
+SCAN start_key end_key
+STATS
+EXIT
 ```
-LOG_FILE_NAME="log_file.txt"       # WAL file name
-MAX_MEMTABLE_SIZE=4096             # memtable size in bytes before flush (default 4KB)
-MAX_L0_FILES=4                     # L0 SSTable count before compaction triggers
-BLOOM_FILTER_SIZE=1000             # number of bits in each bloom filter
-HASH_FUNCTIONS=5                   # number of hash functions used by bloom filter
-SPARSE_INDEX_N=4                   # sample every Nth key for the sparse index
-WAL_BUFFER_SIZE=100                # number of writes before WAL is flushed to disk
-TOMBSTONE_VALUE="__TOMBSTONE__"
-LOG_COMPACTION_THRESHOLD=10000     # replication log entries before a snapshot is taken and the log is truncated
-BENCHMARK_N=100000                 # number of operations to run in the benchmark
+
+Keys and values are currently space-delimited, so the REPL works best with single-token keys and values.
+
+## Cluster Mode
+
+Each node runs a FastAPI server from `src.cluster.node`. Start a 3-node cluster in three terminals:
+
+```bash
+python -m src.cluster.node 8000 node_data_8000 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
+python -m src.cluster.node 8001 node_data_8001 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
+python -m src.cluster.node 8002 node_data_8002 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
 ```
 
-## Architecture
+Arguments:
 
-### Memtable
-Writes go into an in-memory dictionary first. Since there is no disk I/O on the write path, the writes are fairly quick. Once the memtable hits `MAX_MEMTABLE_SIZE` bytes, it gets promoted to an immutable memtable and a fresh active memtable is opened immediately. The immutable memtable is then flushed to disk as an SSTable. Reads check the active memtable first, then the immutable memtable if one exists, then SSTables.
+`<port> <data_dir> <leader_url> <comma_separated_node_urls>`
 
-### Write-Ahead Log (WAL)
-Every write goes to the WAL and memtable together. WAL writes are buffered and flushed every WAL_BUFFER_SIZE operations, with a forced flush before any memtable hits disk. On startup, the log is replayed to recover any writes that hadn't been flushed yet.
+Notes:
 
-### SSTables
-When the memtable flushes, keys are sorted and written to a new file. Reads binary search instead of scanning. 
+- The third argument is the node to treat as leader on startup.
+- If that leader goes away, the remaining nodes elect a new leader.
+- Writes can be sent to any node. Followers forward them to the leader.
+- A write succeeds only after a majority of nodes acknowledge it.
+- A consistent read is forwarded to the leader.
 
-### Bloom Filters
-Each SSTable has a bloom filter. Before reading an SSTable for a key, the filter is checked first. If it says the key isn't there, the file read is skipped entirely. Lookups for missing keys stay fast regardless of how many SSTables are on disk. 
+### HTTP Endpoints
 
-### Sparse Index
-Each SSTable has a sparse index: a sampled list of keys and their byte offsets, recorded every N entries. On lookup the sparse index is binary searched to find the closest offset, then the file seek jumps directly to that point. 
+- `POST /set` with `{"key": "foo", "value": "bar"}`
+- `POST /delete` with `{"key": "foo"}`
+- `GET /get?key=foo`
+- `GET /get?key=foo&consistent=true`
+- `GET /status`
+- `POST /add_node` with `{"node_url": "http://localhost:8003"}`
+- `POST /remove_node` with `{"node_url": "http://localhost:8003"}`
 
-### Leveled Compaction
-SSTables are organized into levels. All flushes land in L0, where files can have overlapping key ranges. When L0 hits `MAX_L0_FILES`, it compacts into L1 by merging with any overlapping L1 files. Each level is 10x larger than the last, so if L1 overflows, then it cascades down. A manifest file (`manifest.json`) tracks each SSTable's level and key range.
+Cluster nodes persist their own files inside the `data_dir` you pass at startup.
 
-### Stats API
-The `stats()` method returns a snapshot of the store's current state:
+## Configuration
 
-- `sstable_count`: total number of SSTables across all levels
-- `sstables_per_level`: SSTable count broken down by level
-- `total_size_bytes`: total size of all SSTable files on disk
-- `memtable_size_bytes`: current memtable size in bytes
-- `memtable_keys`: number of live keys currently in the memtable
-- `bytes_written_disk`: total bytes written to SSTable files across all flushes and compactions
-- `write_amplification`: ratio of bytes written to disk vs bytes written by the caller — compaction rewrites data across levels, so this grows over time
+Configuration is loaded from a `.env` file in the project root.
 
-### MVCC (Snapshot Reads)
-Every write is assigned a monotonically increasing sequence number. The memtable stores all versions of each key as a list of `(seq, value)` pairs. `get(key)` returns the latest version by default. `get(key, at=seq)` returns the most recent version where the sequence number is at or below `seq`. All versions are written to disk on flush, so snapshot reads work across SSTable boundaries too.
+| Variable | Default | Purpose |
+|---|---:|---|
+| `LOG_FILE_NAME` | `log_file.txt` | WAL file for the standalone store |
+| `MAX_MEMTABLE_SIZE` | `4096` | Flush threshold in bytes |
+| `TOMBSTONE_VALUE` | `__TOMBSTONE__` | Delete marker |
+| `HASH_FUNCTIONS` | `5` | Hash count for bloom filters |
+| `BLOOM_FILTER_SIZE` | `5` | Bloom filter size in bits |
+| `SPARSE_INDEX_N` | `4` | Record every Nth key in the sparse index |
+| `MAX_L0_FILES` | `2` | Number of L0 files before compaction kicks in |
+| `BENCHMARK_N` | `100000` | Number of benchmark operations |
+| `WAL_BUFFER_SIZE` | `100` | WAL flush interval in operations |
+| `LOG_COMPACTION_THRESHOLD` | `10000` | Cluster log length before snapshotting |
 
-### Tombstones
-Deletes write a tombstone marker instead of removing data immediately, since the key might exist in an older SSTable. During compaction, tombstones are dropped once there are no files at a lower level that could have the original value. Old versions of a key are also dropped during compaction, only the latest version survives.
+The checked-in defaults are intentionally small so flushes, compactions, and tests happen quickly. For real experiments, you will probably want larger bloom filters and larger level thresholds.
 
-### Distributed Key-Value Layer
+## How the Store Works
 
-The LSM-tree is wrapped in a FastAPI HTTP server. A cluster has one leader at a time, elected via a Raft-style protocol with randomized timeouts and a pre-vote phase to prevent term inflation from partitioned nodes. The leader accepts writes, applies them locally, then replicates to all followers in parallel. A write is acknowledged to the caller only after a majority of nodes confirm it, so the cluster can tolerate up to `floor(n/2)` node failures without losing writes.
+### Write Path
 
-A write to a follower is forwarded transparently to the leader. A consistent read (`GET /get?key=k&consistent=true`) is also forwarded to the leader to avoid returning stale data.
+Every write is appended to the WAL and applied to the active memtable. Once the active memtable grows past `MAX_MEMTABLE_SIZE`, it is rotated into an immutable memtable, a fresh memtable becomes active immediately, and a background thread flushes the immutable one to a new SSTable.
 
-Followers that fall behind are caught up via heartbeat: the leader tracks each follower's log index and includes any missing entries in the next heartbeat. A new node joining the cluster can also pull the full history from the leader via `/sync` at startup.
+### Read Path
 
-Nodes can be added or removed at runtime via `/add_node` and `/remove_node`. Membership changes are replicated through the log so all nodes apply them at the same point.
+Reads check the active memtable first, then the immutable memtable, then SSTables. SSTable lookups use:
 
-### Persistent Replication Log and Snapshots
+- Manifest key ranges to skip unrelated files
+- Bloom filters to avoid unnecessary file reads
+- Sparse indexes to seek close to the target key before scanning
 
-Every write the leader processes is appended to an on-disk replication log (`replication.log`) in the node's data directory. On startup, the node reads this file back and reconstructs its in-memory log before accepting connections. This means a restarted node can rejoin the cluster and serve reads immediately.
+### SSTables and Compaction
 
-Once the log exceeds `LOG_COMPACTION_THRESHOLD` entries, the node takes a snapshot: it serializes the full current KV state to `snapshot.json`, then truncates the replication log. On the next startup, the node loads the snapshot first and only replays log entries that came after it. This keeps startup time and memory usage bounded regardless of how long the cluster has been running. When a joining node is too far behind the snapshot, `/sync` sends the snapshot directly instead of individual log entries.
+Each SSTable record stores `key seq value checksum`. The checksum is verified on read. L0 files may overlap. When enough L0 files build up, they are compacted into the next level along with overlapping files there. During compaction, overwritten versions are dropped and tombstones are removed once older data can no longer resurface from a lower level.
 
-### CRC Checksums
-Each SSTable line is written with a CRC32 checksum. On read, the checksum is recomputed and if it doesn't match a `ValueError` is raised right away instead of returning bad data.
+### Snapshot Reads
 
-### Atomic Manifest Writes
-The manifest is written to a temp file and renamed into place with `os.replace`, which is atomic on both Windows and Linux. A crash mid-write can't corrupt it.
+Each write gets a monotonically increasing sequence number. The Python API supports snapshot reads:
 
-### Concurrent Reads
-A read-write lock lets multiple `get` and `scan` calls run in parallel while writes stay exclusive. SSTable reads release the GIL during file I/O, so threads actually overlap on disk reads.
+```python
+store.get("foo", at=seq)
+store.scan("a", "z", at=seq)
+```
+
+That lets you read the latest value at or before a specific sequence number.
+
+### Startup and Recovery
+
+On startup, the standalone store reloads existing SSTables, bloom filters, sparse indexes, and then replays the WAL. The manifest is stored in `manifest.json` and written atomically through a temporary file plus `os.replace`.
+
+## How the Cluster Works
+
+The cluster layer wraps the storage engine with a small HTTP service. The protocol is Raft-inspired rather than a full Raft implementation.
+
+- One node acts as leader at a time.
+- Followers receive heartbeats from the leader.
+- If heartbeats stop, followers start an election after a randomized timeout.
+- The leader applies a write locally, appends it to `replication.log`, and sends it to followers in parallel.
+- Followers that miss entries can catch up through heartbeats or through `/sync` on startup.
+- Once the replication log grows past `LOG_COMPACTION_THRESHOLD`, the node snapshots state to `snapshot.json` and truncates the log.
+
+Each node also persists election state in `state.json`.
 
 ## Benchmarks
 
-Run with `python -m src.benchmark`. These results are from my personal Windows 11 machine with a 4KB memtable and N=100,000:
+Run:
 
-| Operation          | Ops/sec   |
-|--------------------|-----------|
-| Writes             | ~262,000  |
-| Reads (1 thread)   | ~407,000  |
-| Reads (4 threads)  | ~101,000  |
-| Misses             | ~94,000   |
+```bash
+python -m src.benchmark
+```
 
-Writes are fast because the background flush thread means a write just hits the WAL buffer and the memtable dict, then returns. Disk I/O happens in the background without blocking the caller.
+The benchmark script creates a temporary store, runs writes, single-threaded reads, 4-thread reads, and misses, then prints ops/sec for your machine.
 
-Reads are fast for the same reason. With writes that quick, most data is still in the memtable by the time reads run, so reads are mostly dictionary lookups.
+## Tests
 
-4-thread reads are actually slower than single-threaded here. When reads hit the memtable, the work is CPU-bound, not I/O-bound. Python's GIL forces threads to take turns on CPU work, so the switching overhead makes things worse. Multi-threading helps when threads block on disk I/O and can genuinely overlap. With memtable hits, they can't.
+Run the full test suite with:
 
-Misses are slower than reads because each miss has to check the bloom filter for every SSTable on disk before confirming the key doesn't exist. A memtable hit returns immediately.
+```bash
+pytest tests
+```
+
+The tests cover:
+
+- Basic set, get, delete, scan, and iteration
+- WAL replay and restart behavior
+- Compaction and tombstone handling
+- Snapshot reads
+- Checksum and manifest durability cases
+- Concurrent reads
+- Cluster replication, forwarding, elections, restart recovery, snapshots, and membership changes
+
+## Files You Will See
+
+Standalone store files:
+
+- `log_file.txt`
+- `manifest.json`
+- `sst_<n>`
+- `sst_<n>.index`
+- `sst_<n>.bloom`
+
+Cluster node files:
+
+- `replication.log`
+- `snapshot.json`
+- `state.json`
+
+## Limitations
+
+- Keys and values are treated as plain strings.
+- The REPL and WAL format do not safely encode values with spaces.
+- The cluster protocol is intentionally small and simplified.
+- There is no authentication, encryption, or production hardening.
