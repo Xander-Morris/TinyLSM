@@ -364,7 +364,7 @@ if __name__ == "__main__":
     os.makedirs(data_dir, exist_ok=True)
     os.chdir(data_dir)
     store = kv_store.KVStore()
-    my_url = f"http://localhost:{port}"
+    my_url = os.getenv("MY_URL", f"http://localhost:{port}")
 
     _load_snapshot_from_disk()
     _load_log_from_disk()

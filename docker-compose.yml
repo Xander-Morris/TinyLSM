@@ -1,0 +1,46 @@
+services:
+  node1:
+    build: .
+    environment:
+      MY_URL: http://node1:8000
+    command: ["8000", "/data", "http://node1:8000", "http://node1:8000,http://node2:8000,http://node3:8000"]
+    volumes:
+      - node1_data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/status')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  node2:
+    build: .
+    environment:
+      MY_URL: http://node2:8000
+    command: ["8000", "/data", "http://node1:8000", "http://node1:8000,http://node2:8000,http://node3:8000"]
+    volumes:
+      - node2_data:/data
+    ports:
+      - "8001:8000"
+    depends_on:
+      node1:
+        condition: service_healthy
+
+  node3:
+    build: .
+    environment:
+      MY_URL: http://node3:8000
+    command: ["8000", "/data", "http://node1:8000", "http://node1:8000,http://node2:8000,http://node3:8000"]
+    volumes:
+      - node3_data:/data
+    ports:
+      - "8002:8000"
+    depends_on:
+      node1:
+        condition: service_healthy
+
+volumes:
+  node1_data:
+  node2_data:
+  node3_data:
