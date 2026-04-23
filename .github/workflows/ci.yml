@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt && pip install -e .
+
+      - name: Run tests
+        run: pytest tests -v
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t tinylsm .
+
+      - name: Smoke test cluster
+        run: |
+          docker compose up -d
+          sleep 10
+          curl --retry 5 --retry-delay 2 --retry-connrefused http://localhost:8000/status
+          curl -sf -X POST http://localhost:8000/set \
+            -H "Content-Type: application/json" \
+            -d '{"key":"ci","value":"ok"}'
+          result=$(curl -sf "http://localhost:8001/get?key=ci")
+          echo "$result"
+          echo "$result" | grep -q '"value":"ok"'
+          docker compose down
