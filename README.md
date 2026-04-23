@@ -21,6 +21,7 @@ It is not meant to be a production database. It is meant to be readable, hackabl
 ## Requirements
 
 - Python 3.11 or newer
+- Docker and Docker Compose (for cluster mode)
 
 ## Quick Start
 
@@ -60,9 +61,25 @@ EXIT
 
 Keys and values are currently space-delimited, so the REPL works best with single-token keys and values.
 
+## Docker
+
+The cluster runs as three containers using Docker Compose. Each container gets its own named volume so data survives restarts.
+
+```bash
+docker compose up --build
+```
+
+This starts nodes on ports 8000, 8001, and 8002. Nodes discover each other by service name inside the Docker network. Once up, any of the HTTP endpoints below work against any port.
+
+To stop and remove containers (volumes are kept):
+
+```bash
+docker compose down
+```
+
 ## Cluster Mode
 
-Each node runs a FastAPI server from `src.cluster.node`. Start a 3-node cluster in three terminals:
+Each node runs a FastAPI server from `src.cluster.node`. To run without Docker, start a 3-node cluster in three terminals:
 
 ```bash
 python -m src.cluster.node 8000 node_data_8000 http://localhost:8000 http://localhost:8000,http://localhost:8001,http://localhost:8002
@@ -93,6 +110,34 @@ Notes:
 - `POST /remove_node` with `{"node_url": "http://localhost:8003"}`
 
 Cluster nodes persist their own files inside the `data_dir` you pass at startup.
+
+## Kubernetes
+
+Manifests are in `k8s/`. The cluster runs as a StatefulSet so each pod gets a stable DNS name and its own PersistentVolume.
+
+With minikube:
+
+```bash
+minikube start
+minikube image load tinylsm:latest
+kubectl apply -f k8s/
+kubectl get pods -w
+```
+
+Pods start in order (`tinylsm-0` first, then `tinylsm-1`, then `tinylsm-2`) so the initial leader is ready before followers try to sync from it.
+
+Once all pods are running:
+
+```bash
+curl http://$(minikube ip):30000/status
+curl -X POST http://$(minikube ip):30000/set \
+  -H "Content-Type: application/json" \
+  -d '{"key":"foo","value":"bar"}'
+```
+
+## CI
+
+GitHub Actions runs on every push and pull request to `main`. The `test` job runs the full pytest suite. The `docker` job builds the image and runs a smoke test against a live 3-node cluster.
 
 ## Configuration
 
