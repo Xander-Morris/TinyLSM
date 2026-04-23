@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tinylsm
+spec:
+  serviceName: tinylsm
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tinylsm
+  template:
+    metadata:
+      labels:
+        app: tinylsm
+    spec:
+      containers:
+        - name: tinylsm
+          image: tinylsm:latest
+          # Use IfNotPresent when loading image into minikube locally
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # Expands to e.g. http://tinylsm-0.tinylsm:8000
+            - name: MY_URL
+              value: "http://$(POD_NAME).tinylsm:8000"
+          args:
+            - "8000"
+            - "/data"
+            - "http://tinylsm-0.tinylsm:8000"
+            - "http://tinylsm-0.tinylsm:8000,http://tinylsm-1.tinylsm:8000,http://tinylsm-2.tinylsm:8000"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+  # Each pod gets its own PersistentVolume — survives pod restarts
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
