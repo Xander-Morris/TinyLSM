@@ -218,10 +218,10 @@ Example output with `N=100000`:
 
 ```text
 Doing the benchmarks with N=100000...
-Writes: 100000 ops in 0.38s -> 261274 ops/sec
-Reads (1 thread):  100000 ops in 0.25s -> 401483 ops/sec
-Reads (4 threads): 100000 ops in 0.24s -> 425106 ops/sec
-Misses: 100000 ops in 0.92s -> 108694 ops/sec
+Writes: 100000 ops in 0.37s -> 272338 ops/sec
+Reads (1 thread):  100000 ops in 0.21s -> 467495 ops/sec
+Reads (4 threads): 100000 ops in 0.20s -> 489054 ops/sec
+Misses: 100000 ops in 0.94s -> 106651 ops/sec
 ```
 
 ## Tests
