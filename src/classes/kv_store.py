@@ -348,8 +348,8 @@ class KVStore:
             if not self._bloom_filters[index].contains(key):
                 continue 
                 
-            if self._sparse_indexes[index]: 
-                sparse_index_result = self._search_sstable_with_index(index, key, at)
+            if self._sparse_indexes[index]:
+                sparse_index_result = KVStore._search_sstable_with_index(index, self._sparse_indexes[index], key, at)
 
                 if sparse_index_result == config.TOMBSTONE_VALUE:
                     return None 
@@ -370,18 +370,15 @@ class KVStore:
         
         return None 
     
-    def _search_sstable_with_index(self, index, key, at=None):
-        if not self._sparse_indexes[index]:
-            print(f"No sparse index exists in the sparse_indexes dictionary for {index}!")
-            return
-
-        offset = KVStore._search_sparse_index_for_key_offset(self._sparse_indexes[index], key)
+    @staticmethod
+    def _search_sstable_with_index(index, sparse_index, key, at=None):
+        offset = KVStore._search_sparse_index_for_key_offset(sparse_index, key)
         versions = []
 
-        with open(f"sst_{index}", 'r') as file: 
+        with open(f"sst_{index}", 'r') as file:
             file.seek(offset)
 
-            for line in file: 
+            for line in file:
                 line = line.strip()
                 inner_key, seq, value = KVStore._parse_sstable_line(line)
 
@@ -389,7 +386,7 @@ class KVStore:
                     versions.append((seq, value))
                 elif key < inner_key:
                     break
-        
+
         return KVStore._pick_version(versions, at) if versions else None
 
     def _load_sstables(self):
@@ -480,6 +477,7 @@ class KVStore:
     # Public Methods 
     # Read Operations
     def get(self, key: str, at=None):
+        # Phase 1: check memtables and snapshot SSTable metadata under read lock (no file I/O).
         with self._lock.read():
             raw_value = None
 
@@ -489,10 +487,38 @@ class KVStore:
             if raw_value is None and self._imm_memtable is not None and key in self._imm_memtable:
                 raw_value = KVStore._get_raw_value_from_table_at(self._imm_memtable, key, at)
 
-            if raw_value is None:
-                raw_value = self._search_sstables(key, at)
+            if raw_value is not None:
+                return None if raw_value == config.TOMBSTONE_VALUE else raw_value
 
-            return None if raw_value == config.TOMBSTONE_VALUE else raw_value
+            sorted_entries = sorted(
+                self._manifest.entries,
+                key=lambda e: (0, -KVStore._sst_index(e)) if e["level"] == 0 else (e["level"], 0),
+            )
+            search_plan = []
+            for entry in sorted_entries:
+                if entry["level"] > 0 and (key > entry["max_key"] or key < entry["min_key"]):
+                    continue
+                index = KVStore._sst_index(entry)
+                search_plan.append((index, self._bloom_filters[index], self._sparse_indexes[index]))
+
+        # Phase 2: file I/O outside the lock. Python releases the GIL during file syscalls,
+        # so multiple threads can truly run in parallel here.
+        for index, bf, sparse_idx in search_plan:
+            if not bf.contains(key):
+                continue
+
+            if sparse_idx:
+                result = KVStore._search_sstable_with_index(index, sparse_idx, key, at)
+            else:
+                tuples = KVStore._build_sstable_tuples(index)
+                result = KVStore._binary_search(tuples, key, at)
+
+            if result == config.TOMBSTONE_VALUE:
+                return None
+            if result is not None:
+                return result
+
+        return None
 
     def scan(self, start: str, end: str, at=None):
         return list(self.iter(start, end, at))
