@@ -255,7 +255,7 @@ class KVStore:
         for key, versions in merged.items():
             if versions[0][1] == config.TOMBSTONE_VALUE:
                 has_older = any(
-                    e["level"] < level and e["min_key"] <= key <= e["max_key"]
+                    e["level"] > level + 1 and e["min_key"] <= key <= e["max_key"]
                     for e in self._manifest.entries
                 )
                 if not has_older:
