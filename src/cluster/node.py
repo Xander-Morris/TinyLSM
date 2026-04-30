@@ -386,16 +386,7 @@ def heartbeat(req: HeartbeatRequest):
 
 @app.post("/replicate")
 def replicate(req: ReplicateRequest):
-    if req.operation == "set":
-        store.set(req.key, req.value)
-    elif req.operation == "delete":
-        store.delete(req.key)
-    elif req.operation == "add_node":
-        with state:
-            state.nodes.append(req.key)
-    elif req.operation == "remove_node":
-        with state:
-            state.nodes.remove(req.key)
+    _handle_operation(req.operation, req.key, req.value)
 
     entry = {"index": req.index, "operation": req.operation, "key": req.key, "value": req.value}
     with state:
