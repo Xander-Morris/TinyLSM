@@ -10,8 +10,8 @@ from pydantic import BaseModel
 import requests
 from typing import Literal
 import time
-from src import config as config
-from src.classes import raft_state as raft_state
+from src import config
+from src.classes import raft_state
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
@@ -301,7 +301,6 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
 
 def _update_state_from_heartbeat(req):
     new_entries = []
-    log_index = -1 
 
     with state:
         state.last_heartbeat = time.time()
