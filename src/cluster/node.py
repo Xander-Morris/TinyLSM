@@ -215,6 +215,25 @@ class HeartbeatRequest(BaseModel):
 class NodeRequest(BaseModel):
     node_url: str
 
+def _do_compaction(current_index):
+    snapshot_data = store.dump()
+    _write_snapshot(current_index, snapshot_data)
+    with state:
+        state.log.clear()
+    with open(REPLICATION_LOG_FILE, 'w') as f:
+        f.write("")
+
+def _handle_operation(operation, key, value):
+    if operation == "set":
+        store.set(key, value)
+    elif operation == "delete":
+        store.delete(key)
+    elif operation == "add_node":
+        with state:
+            state.nodes.append(key)
+    elif operation == "remove_node":
+        with state:
+            state.nodes.remove(key)
 
 def do_replicated_operation(operation: Literal["set", "delete", "add_node", "remove_node"], key: str, value: str | None = None):
     if operation not in ("set", "delete", "add_node", "remove_node"):
@@ -234,16 +253,7 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
         )
         return response.json()
 
-    if operation == "set":
-        store.set(key, value)
-    elif operation == "delete":
-        store.delete(key)
-    elif operation == "add_node":
-        with state:
-            state.nodes.append(key)
-    elif operation == "remove_node":
-        with state:
-            state.nodes.remove(key)
+    _handle_operation(operation, key, value)
 
     with state:
         state.log_index += 1
@@ -255,12 +265,7 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
     _append_log_entry(entry)
 
     if should_compact:
-        snapshot_data = store.dump()
-        _write_snapshot(current_index, snapshot_data)
-        with state:
-            state.log.clear()
-        with open(REPLICATION_LOG_FILE, 'w') as f:
-            f.write("")
+        _do_compaction(current_index)
 
     successes = 1
     successes_lock = threading.Lock()
