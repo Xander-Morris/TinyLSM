@@ -11,6 +11,7 @@ from typing import Literal
 import time
 import threading
 from src import config as config 
+from src.classes import raft_state as raft_state 
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
@@ -38,7 +39,23 @@ term = 0
 voted_for = None
 last_heartbeat = time.time()
 follower_indices = {}  # {node_url: last_known_log_index}
-_vote_lock = threading.Lock()
+state = raft_state.RaftState()
+
+def _try_operation_until_success_or_max_tries(operation, max_tries, delay=0.1):
+    tries = 0
+
+    while tries < max_tries:
+        tries += 1
+
+        try:
+            return operation() 
+        except Exception as e: 
+            print(f"Attempt {tries} failed: {e}")
+
+            if tries == max_tries:
+                raise 
+
+            time.sleep(delay) 
 
 def _write_snapshot(index, data):
     global snapshot_index
@@ -90,7 +107,8 @@ def _load_log_from_disk():
                     entry = json.loads(line)
 
                     if entry["index"] > log_index:
-                        log.append(entry)
+                        with _log_lock:
+                            log.append(entry)
                         log_index = entry["index"]
     except FileNotFoundError:
         pass
@@ -105,7 +123,9 @@ def _send_heartbeats():
                 "term": term,
                 "entries": entries_to_send,
             }, timeout=0.1)
-            follower_indices[node_url] = response.json().get("log_index", follower_index)
+
+            with _follower_indices_lock:
+                follower_indices[node_url] = response.json().get("log_index", follower_index)
         except Exception:
             pass
 
@@ -128,17 +148,16 @@ def _start_election():
         vote_lock = threading.Lock()
 
         def _request_vote(node_url):
-            nonlocal votes
-
-            try:
+            def _operation():
+                nonlocal votes
                 endpoint = "/prevote" if prevote else "/vote"
                 response = requests.post(f"{node_url}{endpoint}", json={"candidate_url": my_url, "term": vote_term}, timeout=0.2)
                 
                 if response.json().get("vote_granted"):
                     with vote_lock:
                         votes += 1
-            except Exception:
-                pass
+
+            _try_operation_until_success_or_max_tries(_operation, 3, 0.1) 
 
         threads = [threading.Thread(target=_request_vote, args=(url,)) for url in NODES if url != my_url]
 
@@ -212,13 +231,15 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
     global log_index
     log_index += 1
     entry = {"index": log_index, "operation": operation, "key": key, "value": value}
-    log.append(entry)
-    _append_log_entry(entry)
+    with _log_lock:
+        log.append(entry)
+        _append_log_entry(entry)
 
     if len(log) > config.LOG_COMPACTION_THRESHOLD:
         state = store.dump()
         _write_snapshot(log_index, state)
-        log.clear()
+        with _log_lock:
+            log.clear()
 
         with open(REPLICATION_LOG_FILE, 'w') as f:
             f.write("")
@@ -229,13 +250,14 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
     _successes_lock = threading.Lock()
 
     def _replicate_one(node_url):
-        nonlocal successes
-        try:
+        def _operation():
+            nonlocal successes
             requests.post(f"{node_url}/replicate", json={"operation": operation, "index": log_index, **json_tbl}, timeout=1)
+
             with _successes_lock:
                 successes += 1
-        except Exception:
-            pass
+
+        _try_operation_until_success_or_max_tries(_operation, 3, 0.1)
 
     threads = [
         threading.Thread(target=_replicate_one, args=(url,))
@@ -301,7 +323,9 @@ def heartbeat(req: HeartbeatRequest):
                     store.set(entry["key"], entry["value"])
                 elif entry["operation"] == "delete":
                     store.delete(entry["key"])
-                log.append(entry)
+                
+                with _log_lock:
+                    log.append(entry)
                 log_index = entry["index"]
                 _append_log_entry(entry)
 
@@ -322,7 +346,8 @@ def replicate(req: ReplicateRequest):
 
     log_index = req.index
     entry = {"index": req.index, "operation": req.operation, "key": req.key, "value": req.value}
-    log.append(entry)
+    with _log_lock:
+        log.append(entry)
     _append_log_entry(entry)
 
     return {"ok": True}
@@ -384,7 +409,9 @@ if __name__ == "__main__":
                         store.set(entry["key"], entry["value"])
                     elif entry["operation"] == "delete":
                         store.delete(entry["key"])
-                    log.append(entry)
+
+                    with _log_lock:
+                        log.append(entry)
                     log_index = entry["index"]
 
             if "snapshot" in response:
