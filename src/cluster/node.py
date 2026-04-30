@@ -25,16 +25,13 @@ store = None
 port = None
 my_url = None
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     with state:
         state.last_heartbeat = time.time()
     yield
 
-
 app = FastAPI(lifespan=lifespan)
-
 
 def _try_operation_until_success_or_max_tries(operation, max_tries, delay=0.1):
     tries = 0
@@ -52,13 +49,11 @@ def _try_operation_until_success_or_max_tries(operation, max_tries, delay=0.1):
 
             time.sleep(delay)
 
-
 def _write_snapshot(index, snapshot_data):
     with open(SNAPSHOT_FILE, 'w') as f:
         f.write(json.dumps({"index": index, "data": snapshot_data}))
     with state:
         state.snapshot_index = index
-
 
 def _load_snapshot_from_disk():
     try:
@@ -71,7 +66,6 @@ def _load_snapshot_from_disk():
     except FileNotFoundError:
         pass
 
-
 def _load_state_from_disk():
     try:
         with open(STATE_FILE, 'r') as f:
@@ -81,16 +75,13 @@ def _load_state_from_disk():
     except FileNotFoundError:
         pass
 
-
 def _persist_vote_state(term, voted_for):
     with open(STATE_FILE, 'w') as f:
         f.write(json.dumps({"term": term, "voted_for": voted_for}))
 
-
 def _append_log_entry(entry):
     with open(REPLICATION_LOG_FILE, 'a') as f:
         f.write(json.dumps(entry) + '\n')
-
 
 def _load_log_from_disk():
     try:
@@ -104,7 +95,6 @@ def _load_log_from_disk():
                         state.log_index = entry["index"]
     except FileNotFoundError:
         pass
-
 
 def _send_heartbeats():
     def _heartbeat_one(node_url):
@@ -238,7 +228,10 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
         leader = state.leader
 
     if my_url != leader:
-        response = requests.post(f"{leader}/{operation}", json=json_tbl, timeout=5)
+        response = _try_operation_until_success_or_max_tries(
+            lambda: requests.post(f"{leader}/{operation}", json=json_tbl, timeout=5),
+            max_tries=3,
+        )
         return response.json()
 
     if operation == "set":
@@ -308,7 +301,10 @@ def get(key: str, consistent: bool = False):
         leader = state.leader
 
     if consistent and my_url != leader:
-        return requests.get(f"{leader}/get", params={"key": key, "consistent": True}).json()
+        return _try_operation_until_success_or_max_tries(
+            lambda: requests.get(f"{leader}/get", params={"key": key, "consistent": True}).json(),
+            max_tries=3,
+        )
 
     value = store.get(key)
     return {"key": key, "value": value}
@@ -458,7 +454,11 @@ if __name__ == "__main__":
 
     if my_url != state.leader:
         try:
-            response = requests.get(f"{state.leader}/sync", params={"from_index": state.log_index}).json()
+            response = _try_operation_until_success_or_max_tries(
+                lambda: requests.get(f"{state.leader}/sync", params={"from_index": state.log_index}).json(),
+                max_tries=5,
+                delay=0.5,
+            )
 
             def _replay(entries_list):
                 for entry in entries_list:
