@@ -299,6 +299,22 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
     else:
         return {"ok": False, "error": "failed to reach majority"}
 
+def _build_new_entries(req):
+    new_entries = []
+    log_index = -1 
+
+    with state:
+        state.last_heartbeat = time.time()
+        state.leader = req.leader_url
+        state.term = req.term
+        for entry in req.entries:
+            if entry["index"] > state.log_index:
+                state.log.append(entry)
+                state.log_index = entry["index"]
+                new_entries.append(entry)
+        log_index = state.log_index
+
+    return (new_entries, log_index)
 
 @app.get("/get")
 def get(key: str, consistent: bool = False):
@@ -344,11 +360,9 @@ def delete(req: DeleteRequest):
 def add_node(req: NodeRequest):
     return do_replicated_operation("add_node", req.node_url)
 
-
 @app.post("/remove_node")
 def remove_node(req: NodeRequest):
     return do_replicated_operation("remove_node", req.node_url)
-
 
 @app.post("/heartbeat")
 def heartbeat(req: HeartbeatRequest):
@@ -359,17 +373,7 @@ def heartbeat(req: HeartbeatRequest):
         with state:
             return {"ok": True, "log_index": state.log_index}
 
-    new_entries = []
-    with state:
-        state.last_heartbeat = time.time()
-        state.leader = req.leader_url
-        state.term = req.term
-        for entry in req.entries:
-            if entry["index"] > state.log_index:
-                state.log.append(entry)
-                state.log_index = entry["index"]
-                new_entries.append(entry)
-        log_index = state.log_index
+    new_entries, log_index = _build_new_entries(req)
 
     for entry in new_entries:
         if entry["operation"] == "set":
@@ -379,7 +383,6 @@ def heartbeat(req: HeartbeatRequest):
         _append_log_entry(entry)
 
     return {"ok": True, "log_index": log_index}
-
 
 @app.post("/replicate")
 def replicate(req: ReplicateRequest):
@@ -402,12 +405,10 @@ def replicate(req: ReplicateRequest):
     _append_log_entry(entry)
     return {"ok": True}
 
-
 @app.get("/status")
 def status():
     with state:
         return {"leader": state.leader, "term": state.term, "my_url": my_url}
-
 
 @app.post("/vote")
 def vote(req: VoteRequest):
@@ -434,7 +435,6 @@ def prevote(req: VoteRequest):
         elapsed = time.time() - state.last_heartbeat
         timeout = state.election_timeout
     return {"vote_granted": elapsed > timeout * 0.5}
-
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
