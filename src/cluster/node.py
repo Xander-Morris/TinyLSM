@@ -8,7 +8,7 @@ from fastapi import FastAPI
 import requests
 import time
 import src.cluster.context as ctx
-from src.cluster.fastapi import router
+from src.cluster.routes import router
 import src.classes.kv_store as kv_store
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
