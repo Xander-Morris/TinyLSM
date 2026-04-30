@@ -6,12 +6,12 @@ import uvicorn
 import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from pydantic import BaseModel
 import requests
 from typing import Literal
 import time
 from src import config
 from src.classes import raft_state
+import models 
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 import src.classes.kv_store as kv_store
@@ -184,37 +184,6 @@ def _start_election():
                 state.leader = my_url
         threading.Thread(target=_send_heartbeats, daemon=True).start()
 
-
-class SetRequest(BaseModel):
-    key: str
-    value: str
-
-
-class DeleteRequest(BaseModel):
-    key: str
-
-
-class ReplicateRequest(BaseModel):
-    operation: str
-    key: str
-    value: str = None
-    index: int
-
-
-class VoteRequest(BaseModel):
-    candidate_url: str
-    term: int
-
-
-class HeartbeatRequest(BaseModel):
-    leader_url: str
-    term: int
-    entries: list = []
-
-
-class NodeRequest(BaseModel):
-    node_url: str
-
 def _do_compaction(current_index):
     snapshot_data = store.dump()
     _write_snapshot(current_index, snapshot_data)
@@ -344,27 +313,24 @@ def sync(from_index: int):
     else:
         return {"entries": [e for e in log_copy if e["index"] > from_index]}
 
-
 @app.post("/set")
-def set(req: SetRequest):
+def set(req: models.SetRequest):
     return do_replicated_operation("set", req.key, req.value)
 
-
 @app.post("/delete")
-def delete(req: DeleteRequest):
+def delete(req: models.DeleteRequest):
     return do_replicated_operation("delete", req.key)
 
-
 @app.post("/add_node")
-def add_node(req: NodeRequest):
+def add_node(req: models.NodeRequest):
     return do_replicated_operation("add_node", req.node_url)
 
 @app.post("/remove_node")
-def remove_node(req: NodeRequest):
+def remove_node(req: models.NodeRequest):
     return do_replicated_operation("remove_node", req.node_url)
 
 @app.post("/heartbeat")
-def heartbeat(req: HeartbeatRequest):
+def heartbeat(req: models.HeartbeatRequest):
     with state:
         current_term = state.term
 
@@ -381,7 +347,7 @@ def heartbeat(req: HeartbeatRequest):
     return {"ok": True, "log_index": log_index}
 
 @app.post("/replicate")
-def replicate(req: ReplicateRequest):
+def replicate(req: models.ReplicateRequest):
     _handle_operation(req.operation, req.key, req.value)
 
     entry = {"index": req.index, "operation": req.operation, "key": req.key, "value": req.value}
@@ -398,7 +364,7 @@ def status():
         return {"leader": state.leader, "term": state.term, "my_url": my_url}
 
 @app.post("/vote")
-def vote(req: VoteRequest):
+def vote(req: models.VoteRequest):
     vote_granted = False
     save_data = None
 
@@ -415,9 +381,8 @@ def vote(req: VoteRequest):
 
     return {"vote_granted": vote_granted}
 
-
 @app.post("/prevote")
-def prevote(req: VoteRequest):
+def prevote(req: models.VoteRequest):
     with state:
         elapsed = time.time() - state.last_heartbeat
         timeout = state.election_timeout
