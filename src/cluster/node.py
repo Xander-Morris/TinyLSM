@@ -299,7 +299,7 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
     else:
         return {"ok": False, "error": "failed to reach majority"}
 
-def _build_new_entries(req):
+def _update_state_from_heartbeat(req):
     new_entries = []
     log_index = -1 
 
@@ -373,7 +373,7 @@ def heartbeat(req: HeartbeatRequest):
         with state:
             return {"ok": True, "log_index": state.log_index}
 
-    new_entries, log_index = _build_new_entries(req)
+    new_entries, log_index = _update_state_from_heartbeat(req)
 
     for entry in new_entries:
         if entry["operation"] == "set":
