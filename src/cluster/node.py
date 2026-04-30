@@ -376,10 +376,7 @@ def heartbeat(req: HeartbeatRequest):
     new_entries, log_index = _update_state_from_heartbeat(req)
 
     for entry in new_entries:
-        if entry["operation"] == "set":
-            store.set(entry["key"], entry["value"])
-        elif entry["operation"] == "delete":
-            store.delete(entry["key"])
+        _handle_operation(entry["operation"], entry["key"], entry["value"])
         _append_log_entry(entry)
 
     return {"ok": True, "log_index": log_index}
@@ -458,10 +455,7 @@ if __name__ == "__main__":
 
             def _replay(entries_list):
                 for entry in entries_list:
-                    if entry["operation"] == "set":
-                        store.set(entry["key"], entry["value"])
-                    elif entry["operation"] == "delete":
-                        store.delete(entry["key"])
+                    _handle_operation(entry["operation"], entry["key"], entry["value"])
                     state.log.append(entry)
                     state.log_index = entry["index"]
 
