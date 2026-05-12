@@ -1,37 +1,35 @@
-import src.config as config 
+import math
 
-class BloomFilter: 
-    # Static Methods
+class BloomFilter:
+    @staticmethod
+    def for_capacity(n, false_positive_rate):
+        m = math.ceil(-n * math.log(false_positive_rate) / (math.log(2) ** 2))
+        k = max(1, round((m / n) * math.log(2)))
+        return BloomFilter(max(m, 1), k)
+
     @staticmethod
     def deserialize(data):
-        filter = BloomFilter(len(data))
-        index = 0
+        num_hashes, bits_str = data.strip().split("\n", 1)
+        f = BloomFilter(len(bits_str), int(num_hashes))
+        for i, char in enumerate(bits_str):
+            f._bits[i] = int(char)
+        return f
 
-        for char in data: 
-            i = int(char) 
-            filter._bits[index] = i 
-            index += 1
-        
-        return filter 
+    def __init__(self, size, num_hashes):
+        self._bits = [0] * size
+        self._num_hashes = num_hashes
 
-    # Object-Specific Methods 
-    def __init__(self, size):
-        self._bits = [0] * size 
-    
-    # Public Methods 
     def add(self, key):
-        for i in range(config.HASH_FUNCTIONS):
+        for i in range(self._num_hashes):
             index = hash(key + str(i)) % len(self._bits)
             self._bits[index] = 1
 
     def contains(self, key):
-        for i in range(config.HASH_FUNCTIONS):
+        for i in range(self._num_hashes):
             index = hash(key + str(i)) % len(self._bits)
-            
             if self._bits[index] != 1:
-                return False 
-        
+                return False
         return True
-    
+
     def serialize(self):
-        return "".join(str(b) for b in self._bits)
+        return f"{self._num_hashes}\n" + "".join(str(b) for b in self._bits)

@@ -148,15 +148,14 @@ Configuration is loaded from a `.env` file in the project root.
 | `LOG_FILE_NAME` | `log_file.txt` | WAL file for the standalone store |
 | `MAX_MEMTABLE_SIZE` | `4096` | Flush threshold in bytes |
 | `TOMBSTONE_VALUE` | `__TOMBSTONE__` | Delete marker |
-| `HASH_FUNCTIONS` | `5` | Hash count for bloom filters |
-| `BLOOM_FILTER_SIZE` | `5` | Bloom filter size in bits |
+| `BLOOM_FALSE_POSITIVE_RATE` | `0.01` | Target false positive rate for bloom filters |
 | `SPARSE_INDEX_N` | `4` | Record every Nth key in the sparse index |
 | `MAX_L0_FILES` | `2` | Number of L0 files before compaction kicks in |
 | `BENCHMARK_N` | `100000` | Number of benchmark operations |
 | `WAL_BUFFER_SIZE` | `100` | WAL flush interval in operations |
 | `LOG_COMPACTION_THRESHOLD` | `10000` | Cluster log length before snapshotting |
 
-The checked-in defaults are intentionally small so flushes, compactions, and tests happen quickly. For real experiments, you will probably want larger bloom filters and larger level thresholds.
+The checked-in defaults are intentionally small so flushes, compactions, and tests happen quickly. For real experiments, you will probably want larger level thresholds.
 
 ## How the Store Works
 
@@ -169,7 +168,7 @@ Every write is appended to the WAL and applied to the active memtable. Once the 
 Reads check the active memtable first, then the immutable memtable, then SSTables. SSTable lookups use:
 
 - Manifest key ranges to skip unrelated files
-- Bloom filters to avoid unnecessary file reads
+- Bloom filters to skip SSTables that cannot contain the key. Each filter is sized at creation time using the number of keys in the SSTable and the configured false positive rate (`BLOOM_FALSE_POSITIVE_RATE`). Bit count and hash function count are both derived from those two inputs using standard formulas, and both are stored in the `.bloom` file so the filter can be correctly reconstructed on reload.
 - Sparse indexes to seek close to the target key before scanning
 
 ### SSTables and Compaction

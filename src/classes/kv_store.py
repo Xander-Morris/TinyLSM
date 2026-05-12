@@ -217,7 +217,7 @@ class KVStore:
         return write_result 
 
     def _write_bloom_filter(self, items, index):
-        filter = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
+        filter = bloom_filter.BloomFilter.for_capacity(len(items), config.BLOOM_FALSE_POSITIVE_RATE)
 
         for key, _ in items:
             filter.add(key)
@@ -225,7 +225,7 @@ class KVStore:
         with open(f"sst_{index}.bloom", 'w') as file:
             file.write(filter.serialize())
 
-        self._bloom_filters[index] = filter 
+        self._bloom_filters[index] = filter
 
     def _update_manifest(self, level, file_name, min_key, max_key):
         self._manifest.add(level, file_name, min_key, max_key)
@@ -321,7 +321,7 @@ class KVStore:
             sorted_store = sorted(self._imm_memtable.items())
             write_result = KVStore._write_to_sstable_file(index, sorted_store)
 
-            bf = bloom_filter.BloomFilter(config.BLOOM_FILTER_SIZE)
+            bf = bloom_filter.BloomFilter.for_capacity(len(sorted_store), config.BLOOM_FALSE_POSITIVE_RATE)
             for key, _ in sorted_store:
                 bf.add(key)
             with open(f"sst_{index}.bloom", 'w') as file:
