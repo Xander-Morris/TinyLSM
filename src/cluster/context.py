@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import time
 import requests
@@ -27,10 +28,10 @@ def _try_operation_until_success_or_max_tries(operation, max_tries, delay=0.1):
             time.sleep(delay)
 
 def _write_snapshot(index, snapshot_data):
-    with open(SNAPSHOT_FILE, 'w') as f:
-        f.write(json.dumps({"index": index, "data": snapshot_data}))
-    with state:
-        state.snapshot_index = index
+    with open("snapshot.tmp", 'w') as file: 
+        file.write(json.dumps({"index": index, "data": snapshot_data}))
+    # This is atomic on both Windows and Linux, so it can never be in a partial state, which would cause corruption. 
+    os.replace("snapshot.tmp", SNAPSHOT_FILE)
 
 def _load_snapshot_from_disk():
     try:
