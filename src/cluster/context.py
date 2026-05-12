@@ -125,8 +125,6 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
         )
         return response.json()
 
-    _handle_operation(operation, key, value)
-
     with state:
         state.log_index += 1
         entry = {"index": state.log_index, "operation": operation, "key": key, "value": value}
@@ -164,6 +162,7 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
         t.join()
 
     if successes >= majority:
+        _handle_operation(operation, key, value) # only apply operation if majority consensus is reached
         return {"ok": True}
     else:
         return {"ok": False, "error": "failed to reach majority"}

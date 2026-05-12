@@ -189,7 +189,9 @@ That lets you read the latest value at or before a specific sequence number.
 
 ### Startup and Recovery
 
-On startup, the standalone store reloads existing SSTables, bloom filters, sparse indexes, and then replays the WAL. The manifest is stored in `manifest.json` and written atomically through a temporary file plus `os.replace`.
+On startup, the standalone store loads the manifest, then loads bloom filters and sparse indexes for each SSTable (SSTable data itself stays on disk). It restores the sequence counter from the `seq` file if present. It then replays `log_file.txt.flushing` if it exists (data from a flush that was in progress when the process last stopped), followed by the regular WAL. The manifest is stored in `manifest.json` and written atomically through a temporary file plus `os.replace`.
+
+When a flush begins, the current WAL is renamed to `log_file.txt.flushing` and a fresh WAL is opened immediately so new writes are never blocked. The `.flushing` file is deleted only after the SSTable is written and the manifest is updated, making the manifest write the commit point for the flush.
 
 ## How the Cluster Works
 
@@ -247,6 +249,8 @@ The tests cover:
 Standalone store files:
 
 - `log_file.txt`
+- `log_file.txt.flushing`
+- `seq`
 - `manifest.json`
 - `sst_<n>`
 - `sst_<n>.index`
