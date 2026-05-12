@@ -326,8 +326,9 @@ class KVStore:
                 bf.add(key)
             with open(f"sst_{index}.bloom", 'w') as file:
                 file.write(bf.serialize())
-            with open("seq", 'w') as file: 
+            with open("seq.tmp", 'w') as file:
                 file.write(str(self._seq))
+            os.replace("seq.tmp", "seq")
 
             with self._lock.write():
                 self._sparse_indexes[index] = write_result[0]

@@ -54,8 +54,9 @@ def _load_state_from_disk():
         pass
 
 def _persist_vote_state(term, voted_for):
-    with open(STATE_FILE, 'w') as f:
+    with open("state.tmp", 'w') as f:
         f.write(json.dumps({"term": term, "voted_for": voted_for}))
+    os.replace("state.tmp", STATE_FILE)
 
 def _append_log_entry(entry):
     with open(REPLICATION_LOG_FILE, 'a') as f:

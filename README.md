@@ -250,7 +250,9 @@ Standalone store files:
 - `log_file.txt`
 - `log_file.txt.flushing`
 - `seq`
+- `seq.tmp`
 - `manifest.json`
+- `manifest.tmp`
 - `sst_<n>`
 - `sst_<n>.index`
 - `sst_<n>.bloom`
@@ -259,7 +261,9 @@ Cluster node files:
 
 - `replication.log`
 - `snapshot.json`
+- `snapshot.tmp`
 - `state.json`
+- `state.tmp`
 
 ## Limitations
 
