@@ -171,8 +171,15 @@ class KVStore:
         self._load_sstables()
 
         try:
+            with open(config.LOG_FILE_NAME + ".flushing", 'r') as file:
+                for line in file:
+                    self._replay_line(line)
+        except FileNotFoundError:
+            pass
+
+        try:
             with open(config.LOG_FILE_NAME, 'r') as file:
-                for line in file: 
+                for line in file:
                     self._replay_line(line)
         except FileNotFoundError:
             pass
@@ -307,8 +314,7 @@ class KVStore:
         self._entries = 0
         self._wal.flush()
         self._wal.close()
-        self._wal = open(config.LOG_FILE_NAME, 'w')
-        self._wal.close()
+        os.rename(config.LOG_FILE_NAME, config.LOG_FILE_NAME + ".flushing")
         self._wal = open(config.LOG_FILE_NAME, 'a')
 
         def _threaded_funct():
@@ -328,6 +334,10 @@ class KVStore:
                 self._bloom_filters[index] = bf
                 self._bytes_written_disk += os.path.getsize(f"sst_{index}")
                 self._update_manifest(0, f"sst_{index}", write_result[1], write_result[2])
+                try:
+                    os.remove(config.LOG_FILE_NAME + ".flushing")
+                except FileNotFoundError:
+                    pass
                 l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
                 if l0_count >= config.MAX_L0_FILES:
                     self._compact()
