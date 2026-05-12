@@ -320,6 +320,8 @@ class KVStore:
                 bf.add(key)
             with open(f"sst_{index}.bloom", 'w') as file:
                 file.write(bf.serialize())
+            with open("seq", 'w') as file: 
+                file.write(str(self._seq))
 
             with self._lock.write():
                 self._sparse_indexes[index] = write_result[0]
@@ -394,14 +396,14 @@ class KVStore:
         sorted_file_names = sorted(sst_file_names, key=lambda f: int(f.split("_")[1])) # gets the index counter, like in sst_3, we get 3 and sort by that index with respect to the other files
         index_counter = 0
 
+        try: 
+            with open("seq", 'r') as file: 
+                self._seq = int(file.read().strip()) 
+        except FileNotFoundError:
+            print("seq could not be opened")
+
         for file_name in sorted_file_names:
             index_counter = int(file_name.split("_")[1])
-
-            with open(file_name, 'r') as file:
-                for line in file: 
-                    line = line.strip()
-                    key, seq, value = KVStore._parse_sstable_line(line)
-                    self._restore_key_seq_value(key, seq, value)
             
             try:
                 with open(f"sst_{index_counter}.bloom", 'r') as file: 
@@ -417,11 +419,6 @@ class KVStore:
                 print(f"Index file does not exist for index {index_counter}!")
 
         self._index_counter = index_counter
-        self._entries = sum(
-            len(k) + len(versions[-1][1])
-            for k, versions in self._store.items()
-            if versions and versions[-1][1] != config.TOMBSTONE_VALUE
-        )
 
     def _set_key_seq_value(self, key: str, value: str):
         self._seq += 1
