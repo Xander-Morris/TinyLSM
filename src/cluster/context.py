@@ -149,9 +149,11 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
     def _replicate_one(node_url):
         nonlocal successes
         try:
-            requests.post(f"{node_url}/replicate", json={"operation": operation, "index": current_index, **json_tbl}, timeout=1)
-            with successes_lock:
-                successes += 1
+            res = requests.post(f"{node_url}/replicate", json={"operation": operation, "index": current_index, **json_tbl}, timeout=1)
+            
+            if res and res.ok:
+                with successes_lock:
+                    successes += 1
         except Exception:
             pass
 
