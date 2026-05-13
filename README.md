@@ -199,7 +199,7 @@ The cluster layer wraps the storage engine with a small HTTP service. The protoc
 - One node acts as leader at a time.
 - Followers receive heartbeats from the leader.
 - If heartbeats stop, followers start an election after a randomized timeout.
-- The leader applies a write locally, appends it to `replication.log`, and sends it to followers in parallel.
+- The leader appends a write to `replication.log`, sends it to followers in parallel, and applies it to the store only after a majority of nodes acknowledge it.
 - Followers that miss entries can catch up through heartbeats or through `/sync` on startup.
 - Once the replication log grows past `LOG_COMPACTION_THRESHOLD`, the node snapshots state to `snapshot.json` and truncates the log.
 
