@@ -194,12 +194,6 @@ class KVStore:
             self._wal.flush()
             self._wal_buffer_count = 0
 
-    def _restore_key_seq_value(self, key: str, seq: int, value: str):
-        if key not in self._store:
-            self._store[key] = []
-        self._store[key].append((seq, value))
-        self._seq = max(self._seq, seq)
-
     def _replay_line(self, line):
         line = line.strip()
         sp = line.split(" ")
