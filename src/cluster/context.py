@@ -136,9 +136,6 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
 
     _append_log_entry(entry)
 
-    if should_compact:
-        _do_compaction(current_index)
-
     successes = 1
     successes_lock = threading.Lock()
 
@@ -152,7 +149,7 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
         nonlocal successes
         try:
             res = requests.post(f"{node_url}/replicate", json={"operation": operation, "index": current_index, **json_tbl}, timeout=1)
-            
+
             if res and res.ok:
                 with successes_lock:
                     successes += 1
@@ -166,7 +163,9 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
         t.join()
 
     if successes >= majority:
-        _handle_operation(operation, key, value) # only apply operation if majority consensus is reached
+        _handle_operation(operation, key, value)
+        if should_compact:
+            _do_compaction(current_index)
         return {"ok": True}
     else:
         return {"ok": False, "error": "failed to reach majority"}
