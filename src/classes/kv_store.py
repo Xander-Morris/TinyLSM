@@ -275,10 +275,10 @@ class KVStore:
             self._bloom_filters.pop(index, None)
             self._sparse_indexes.pop(index, None)
 
-        sstable_file_size = config.MAX_L0_FILES * (10 ** (level + 1))
+        sstable_key_count = config.MAX_L0_FILES * (10 ** (level + 1))
 
-        for i in range(0, len(merged), sstable_file_size):
-            chunk = merged[i:i + sstable_file_size]
+        for i in range(0, len(merged), sstable_key_count):
+            chunk = merged[i:i + sstable_key_count]
             self._index_counter += 1
             self._write_sstable(self._index_counter, chunk)
             self._update_manifest(level + 1, f"sst_{self._index_counter}", chunk[0][0], chunk[-1][0])
