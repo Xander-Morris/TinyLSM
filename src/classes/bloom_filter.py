@@ -1,4 +1,5 @@
 import math
+import hashlib
 
 class BloomFilter:
     @staticmethod
@@ -14,6 +15,14 @@ class BloomFilter:
         for i, char in enumerate(bits_str):
             f._bits[i] = int(char)
         return f
+    
+    # Private Helpers
+    def _hash_index(self, key, i):
+        if isinstance(key, str):
+            key = key.encode()
+        h = hashlib.sha256(key + i.to_bytes(2, "big")).digest()
+        
+        return int.from_bytes(h, "big") % len(self._bits)
 
     def __init__(self, size, num_hashes):
         self._bits = [0] * size
@@ -21,13 +30,13 @@ class BloomFilter:
 
     def add(self, key):
         for i in range(self._num_hashes):
-            index = hash(key + str(i)) % len(self._bits)
-            self._bits[index] = 1
+            idx = self._hash_index(key, i)
+            self._bits[idx] = 1
 
     def contains(self, key):
         for i in range(self._num_hashes):
-            index = hash(key + str(i)) % len(self._bits)
-            if self._bits[index] != 1:
+            idx = self._hash_index(key, i)
+            if self._bits[idx] != 1:
                 return False
         return True
 
