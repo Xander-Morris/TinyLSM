@@ -13,20 +13,20 @@ class BloomFilter:
     def deserialize(data):
         num_hashes, bits_str = data.strip().split("\n", 1)
         f = BloomFilter(len(bits_str), int(num_hashes))
-        for i, char in enumerate(bits_str):
-            f._bits[i] = int(char)
+        f._bits = bitarray(bits_str)
+
         return f
     
     # Private Helpers
     def _hash_index(self, key, i):
         if isinstance(key, str):
             key = key.encode()
-        h = hashlib.sha256(key + i.to_bytes(2, "big")).digest()
+        h = hashlib.sha256(key + i.to_bytes(4, "big")).digest()
 
         return int.from_bytes(h, "big") % len(self._bits)
 
     def __init__(self, size, num_hashes):
-        self._bits = bitarray([0] * size)
+        self._bits = bitarray(size)
         self._num_hashes = num_hashes
 
     def add(self, key):
@@ -37,9 +37,9 @@ class BloomFilter:
     def contains(self, key):
         for i in range(self._num_hashes):
             idx = self._hash_index(key, i)
-            if self._bits[idx] != 1:
+            if not self._bits[idx]:
                 return False
         return True
 
     def serialize(self):
-        return f"{self._num_hashes}\n" + "".join(str(b) for b in self._bits)
+        return f"{self._num_hashes}\n" + self._bits.to01()
