@@ -1,3 +1,5 @@
+import os 
+
 def process_line(store, line):
     line = line.strip() 
     sp = line.split(" ")

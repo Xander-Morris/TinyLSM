@@ -28,6 +28,8 @@ class Manifest:
     def save(self):
         with open("manifest.tmp", 'w') as file: 
             json.dump(self.entries, file)
+            file.flush()
+            os.fsync(file.fileno())
         # This is atomic on both Windows and Linux, so it can never be in a partial state, which would cause corruption. 
         os.replace("manifest.tmp", "manifest.json")
 

@@ -52,6 +52,8 @@ class KVStore:
         with open(f"sst_{index}.index", 'w') as file:
             for key, offset in sparse:
                 file.write(f"{key} {offset}\n")
+            file.flush()
+            os.fsync(file.fileno())
 
         return (sparse, min_key, max_key)
 
@@ -192,6 +194,7 @@ class KVStore:
 
         if self._wal_buffer_count >= config.WAL_BUFFER_SIZE:
             self._wal.flush()
+            os.fsync(self._wal.fileno())
             self._wal_buffer_count = 0
 
     def _replay_line(self, line):
@@ -218,6 +221,8 @@ class KVStore:
 
         with open(f"sst_{index}.bloom", 'w') as file:
             file.write(filter.serialize())
+            file.flush()
+            os.fsync(file.fileno())
 
         self._bloom_filters[index] = filter
 
@@ -320,8 +325,12 @@ class KVStore:
                 bf.add(key)
             with open(f"sst_{index}.bloom", 'w') as file:
                 file.write(bf.serialize())
+                file.flush()
+                os.fsync(file.fileno())
             with open("seq.tmp", 'w') as file:
                 file.write(str(self._seq))
+                file.flush()
+                os.fsync(file.fileno())
             os.replace("seq.tmp", "seq")
 
             with self._lock.write():
