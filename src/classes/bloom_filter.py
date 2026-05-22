@@ -1,5 +1,6 @@
 import math
 import hashlib
+from bitarray import bitarray 
 
 class BloomFilter:
     @staticmethod
@@ -21,11 +22,11 @@ class BloomFilter:
         if isinstance(key, str):
             key = key.encode()
         h = hashlib.sha256(key + i.to_bytes(2, "big")).digest()
-        
+
         return int.from_bytes(h, "big") % len(self._bits)
 
     def __init__(self, size, num_hashes):
-        self._bits = [0] * size
+        self._bits = bitarray([0] * size)
         self._num_hashes = num_hashes
 
     def add(self, key):
