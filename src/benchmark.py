@@ -6,6 +6,20 @@ import shutil
 import threading
 import src.config as config
 
+BENCHMARK_DEFAULTS = {
+    "MAX_MEMTABLE_SIZE": 1024 * 1024,
+    "MAX_L0_FILES": 8,
+    "WAL_BUFFER_SIZE": 1000,
+}
+
+def configure_benchmark_defaults():
+    if os.getenv("BENCHMARK_USE_STORE_CONFIG"):
+        return
+
+    config.MAX_MEMTABLE_SIZE = int(os.getenv("BENCHMARK_MAX_MEMTABLE_SIZE", BENCHMARK_DEFAULTS["MAX_MEMTABLE_SIZE"]))
+    config.MAX_L0_FILES = int(os.getenv("BENCHMARK_MAX_L0_FILES", BENCHMARK_DEFAULTS["MAX_L0_FILES"]))
+    config.WAL_BUFFER_SIZE = int(os.getenv("BENCHMARK_WAL_BUFFER_SIZE", BENCHMARK_DEFAULTS["WAL_BUFFER_SIZE"]))
+
 def do_benchmark_funct(store, n, funct_type):
     start = time.perf_counter()
     ops = {
@@ -60,9 +74,15 @@ def setup():
 
 def main():
     original_dir = os.getcwd()
+    configure_benchmark_defaults()
     store, pth = setup()
     try:
-        print(f"Doing the benchmarks with N={config.BENCHMARK_N}...")
+        print(
+            f"Doing the benchmarks with N={config.BENCHMARK_N}, "
+            f"MAX_MEMTABLE_SIZE={config.MAX_MEMTABLE_SIZE}, "
+            f"MAX_L0_FILES={config.MAX_L0_FILES}, "
+            f"WAL_BUFFER_SIZE={config.WAL_BUFFER_SIZE}..."
+        )
         total_write_time = benchmark_writes(store, config.BENCHMARK_N)
         print(f"Writes: {config.BENCHMARK_N} ops in {total_write_time:.2f}s -> {int(config.BENCHMARK_N / total_write_time)} ops/sec")
         total_read_time = benchmark_reads(store, config.BENCHMARK_N)
