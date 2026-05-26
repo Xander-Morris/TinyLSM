@@ -8,7 +8,7 @@ class Manifest:
     def load(data_dir):
         path = os.path.join(data_dir, "manifest.json")
         try:
-            with open(path, 'r') as file:
+            with open(path, 'r', encoding='utf-8') as file:
                 lst = json.load(file)
                 obj = Manifest(data_dir)
                 obj.entries = lst
@@ -31,7 +31,7 @@ class Manifest:
     def save(self):
         tmp_path = os.path.join(self._data_dir, "manifest.tmp")
         target_path = os.path.join(self._data_dir, "manifest.json")
-        with open(tmp_path, 'w') as file:
+        with open(tmp_path, 'w', encoding='utf-8') as file:
             json.dump(self.entries, file)
             file.flush()
             os.fsync(file.fileno())
