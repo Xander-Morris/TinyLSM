@@ -1,5 +1,6 @@
 import glob
 import os
+import sys
 import json
 import src.config as config
 import src.classes.bloom_filter as bloom_filter
@@ -8,6 +9,39 @@ import src.classes.read_write_lock as read_write_lock
 import binascii
 import threading
 import heapq
+
+
+# Cross-platform exclusive file lock (advisory).
+if sys.platform == "win32":
+    import msvcrt
+
+    def _try_lock_fd(fd):
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+
+    def _unlock_fd(fd):
+        try:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+else:
+    import fcntl
+
+    def _try_lock_fd(fd):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    def _unlock_fd(fd):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
 
 
 # Identity-checked sentinel — distinct from any user value.
@@ -49,6 +83,21 @@ class KVStore:
         record = json.loads(payload)
         value = _TOMBSTONE if record.get("t") else record["v"]
         return record["k"], int(record["s"]), value
+
+    @staticmethod
+    def _parse_sparse_index_line(line):
+        line = line.rstrip("\r\n")
+        if "\t" not in line:
+            raise ValueError(f"Malformed sparse index line: {line!r}")
+        payload, _, crc_str = line.rpartition("\t")
+        try:
+            stored_crc = int(crc_str)
+        except ValueError:
+            raise ValueError(f"Bad CRC in sparse index line: {line!r}")
+        if binascii.crc32(payload.encode("utf-8")) != stored_crc:
+            raise ValueError(f"Sparse index checksum mismatch: {line!r}")
+        record = json.loads(payload)
+        return record["k"], int(record["o"])
 
     @staticmethod
     def _pick_version(versions, at=None):
@@ -128,6 +177,18 @@ class KVStore:
     def __init__(self, data_dir=None):
         self._data_dir = os.path.abspath(data_dir) if data_dir else os.path.abspath(os.getcwd())
         os.makedirs(self._data_dir, exist_ok=True)
+
+        # Acquire process-level exclusive lock on this data directory.
+        # Another process holding the lock = refuse to open (would corrupt).
+        self._lock_fh = open(self._path("LOCK"), 'wb+')
+        self._lock_fh.write(b'X')
+        self._lock_fh.flush()
+        self._lock_fh.seek(0)
+        if not _try_lock_fd(self._lock_fh.fileno()):
+            self._lock_fh.close()
+            self._lock_fh = None
+            raise RuntimeError(f"Another process holds the lock on {self._data_dir}")
+
         self._store = {}
         self._imm_memtable = None
         self._imm_entries = 0
@@ -140,9 +201,11 @@ class KVStore:
         self._bloom_filters = {}
         self._sparse_indexes = {}
         self._flush_thread = None
+        self._flush_drained = threading.Condition()
         self._manifest = manifest.Manifest.load(self._data_dir)
         self._lock = read_write_lock.ReadWriteLock()
         self._cleanup_orphan_sst_files()
+        self._load_meta()
         self._load_sstables()
 
         try:
@@ -165,6 +228,39 @@ class KVStore:
 
     def _path(self, name):
         return os.path.join(self._data_dir, name)
+
+    def _meta_path(self):
+        return self._path("meta")
+
+    def _load_meta(self):
+        try:
+            with open(self._meta_path(), 'r', encoding='utf-8') as file:
+                meta = json.load(file)
+        except (FileNotFoundError, json.JSONDecodeError, ValueError):
+            return
+
+        try:
+            self._seq = int(meta.get("seq", 0))
+            self._bytes_written_disk = int(meta.get("bytes_written_disk", 0))
+            self._bytes_written_user = int(meta.get("bytes_written_user", 0))
+        except (TypeError, ValueError):
+            # Corrupt counters — fall back to defaults rather than crash init.
+            self._seq = 0
+            self._bytes_written_disk = 0
+            self._bytes_written_user = 0
+
+    def _save_meta(self):
+        meta = {
+            "seq": self._seq,
+            "bytes_written_disk": self._bytes_written_disk,
+            "bytes_written_user": self._bytes_written_user,
+        }
+        tmp = self._path("meta.tmp")
+        with open(tmp, 'w', encoding='utf-8') as file:
+            json.dump(meta, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp, self._meta_path())
 
     def _cleanup_orphan_sst_files(self):
         """Delete SST data/bloom/index files not referenced by the manifest.
@@ -222,7 +318,9 @@ class KVStore:
         with open(self._path(f"sst_{index}.index"), 'w', encoding='utf-8') as file:
             for key, offset in sparse:
                 record = {"k": key, "o": offset}
-                file.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
+                payload = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+                crc = binascii.crc32(payload.encode("utf-8"))
+                file.write(f"{payload}\t{crc}\n")
             file.flush()
             os.fsync(file.fileno())
 
@@ -234,12 +332,11 @@ class KVStore:
 
         with open(file_name, 'r', encoding='utf-8') as file:
             for line in file:
-                line = line.rstrip("\r\n")
-                if not line:
+                if not line.strip():
                     continue
                 if index_file:
-                    record = json.loads(line)
-                    tuples.append((record["k"], int(record["o"])))
+                    k, offset = KVStore._parse_sparse_index_line(line)
+                    tuples.append((k, offset))
                 else:
                     inner_key, seq, value = KVStore._parse_sstable_line(line)
                     tuples.append((inner_key, seq, value))
@@ -429,50 +526,44 @@ class KVStore:
         self._wal = open(self._path(config.LOG_FILE_NAME), 'a', encoding='utf-8')
 
         def _threaded_funct():
-            sorted_store = sorted(self._imm_memtable.items())
-            write_result = self._write_to_sstable_file(index, sorted_store)
+            try:
+                sorted_store = sorted(self._imm_memtable.items())
+                write_result = self._write_to_sstable_file(index, sorted_store)
 
-            bf = bloom_filter.BloomFilter.for_capacity(len(sorted_store), config.BLOOM_FALSE_POSITIVE_RATE)
-            for key, _ in sorted_store:
-                bf.add(key)
-            with open(self._path(f"sst_{index}.bloom"), 'w', encoding='utf-8') as file:
-                file.write(bf.serialize())
-                file.flush()
-                os.fsync(file.fileno())
-            with open(self._path("seq.tmp"), 'w', encoding='utf-8') as file:
-                file.write(str(self._seq))
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(self._path("seq.tmp"), self._path("seq"))
+                bf = bloom_filter.BloomFilter.for_capacity(len(sorted_store), config.BLOOM_FALSE_POSITIVE_RATE)
+                for key, _ in sorted_store:
+                    bf.add(key)
+                with open(self._path(f"sst_{index}.bloom"), 'w', encoding='utf-8') as file:
+                    file.write(bf.serialize())
+                    file.flush()
+                    os.fsync(file.fileno())
 
-            with self._lock.write():
-                self._sparse_indexes[index] = write_result[0]
-                self._bloom_filters[index] = bf
-                self._bytes_written_disk += os.path.getsize(self._path(f"sst_{index}"))
-                self._manifest.add(0, f"sst_{index}", write_result[1], write_result[2])
-                self._manifest.save()
-                try:
-                    os.remove(self._path(config.LOG_FILE_NAME + ".flushing"))
-                except FileNotFoundError:
-                    pass
-                l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
-                if l0_count >= config.MAX_L0_FILES:
-                    self._compact()
-                self._imm_memtable = None
-                self._imm_entries = 0
+                self._save_meta()
+
+                with self._lock.write():
+                    self._sparse_indexes[index] = write_result[0]
+                    self._bloom_filters[index] = bf
+                    self._bytes_written_disk += os.path.getsize(self._path(f"sst_{index}"))
+                    self._manifest.add(0, f"sst_{index}", write_result[1], write_result[2])
+                    self._manifest.save()
+                    try:
+                        os.remove(self._path(config.LOG_FILE_NAME + ".flushing"))
+                    except FileNotFoundError:
+                        pass
+                    l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
+                    if l0_count >= config.MAX_L0_FILES:
+                        self._compact()
+                    self._imm_memtable = None
+                    self._imm_entries = 0
+            finally:
+                # Wake any writers parked on back-pressure.
+                with self._flush_drained:
+                    self._flush_drained.notify_all()
 
         self._flush_thread = threading.Thread(target=_threaded_funct)
         self._flush_thread.start()
 
     def _load_sstables(self):
-        try:
-            with open(self._path("seq"), 'r', encoding='utf-8') as file:
-                raw = file.read().strip()
-                if raw:
-                    self._seq = int(raw)
-        except (FileNotFoundError, ValueError):
-            pass
-
         max_index = 0
         for entry in self._manifest.entries:
             index_counter = KVStore._sst_index(entry)
@@ -512,6 +603,13 @@ class KVStore:
 
         if self._entries >= config.MAX_MEMTABLE_SIZE:
             self._flush()
+
+    def _wait_for_flush_to_drain(self):
+        """Block until the in-flight flush completes — prevents memtable
+        from growing unboundedly when writes outpace flush throughput."""
+        with self._flush_drained:
+            while self._imm_memtable is not None:
+                self._flush_drained.wait()
 
     # Public Methods
     # Read Operations
@@ -555,9 +653,16 @@ class KVStore:
             return None
 
     def scan(self, start: str, end: str, at=None):
-        return list(self.iter(start, end, at))
+        return self._materialize_range(start, end, at)
 
     def iter(self, start: str, end: str, at=None):
+        # Materialize results inside the read lock so callers can safely call
+        # other store methods while iterating. The yielding-while-locked pattern
+        # would deadlock on any nested write call from the same thread.
+        return iter(self._materialize_range(start, end, at))
+
+    def _materialize_range(self, start: str, end: str, at=None):
+        results = []
         with self._lock.read():
             sources = []
             for entry in sorted(self._manifest.entries, key=lambda e: (e["level"], -KVStore._sst_index(e))):
@@ -581,7 +686,7 @@ class KVStore:
                     continue
                 if key != seen_key:
                     if seen_key is not None and should_yield(best_value, best_seq):
-                        yield seen_key, best_value
+                        results.append((seen_key, best_value))
                     seen_key = key
                     best_seq = seq
                     best_value = value
@@ -590,7 +695,9 @@ class KVStore:
                     best_value = value
 
             if seen_key is not None and should_yield(best_value, best_seq):
-                yield seen_key, best_value
+                results.append((seen_key, best_value))
+
+        return results
 
     def stats(self):
         with self._lock.read():
@@ -620,6 +727,7 @@ class KVStore:
                 "memtable_size_bytes": memtable_size,
                 "memtable_keys": keys_num,
                 "bytes_written_disk": self._bytes_written_disk,
+                "bytes_written_user": self._bytes_written_user,
                 "write_amplification": write_amplification,
             }
 
@@ -628,18 +736,30 @@ class KVStore:
 
     # Write Operations
     def set(self, key: str, value: str):
-        with self._lock.write():
-            self._seq += 1
-            seq = self._seq
-            self._wal_write_record("SET", seq, key, value)
-            self._set(key, value, seq)
+        while True:
+            with self._lock.write():
+                if self._imm_memtable is not None and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
+                    pass  # fall through to wait
+                else:
+                    self._seq += 1
+                    seq = self._seq
+                    self._wal_write_record("SET", seq, key, value)
+                    self._set(key, value, seq)
+                    return
+            self._wait_for_flush_to_drain()
 
     def delete(self, key: str):
-        with self._lock.write():
-            self._seq += 1
-            seq = self._seq
-            self._wal_write_record("DELETE", seq, key)
-            self._delete(key, seq)
+        while True:
+            with self._lock.write():
+                if self._imm_memtable is not None and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
+                    pass
+                else:
+                    self._seq += 1
+                    seq = self._seq
+                    self._wal_write_record("DELETE", seq, key)
+                    self._delete(key, seq)
+                    return
+            self._wait_for_flush_to_drain()
 
     # Close
     def close(self):
@@ -652,3 +772,14 @@ class KVStore:
         self._wal.flush()
         os.fsync(self._wal.fileno())
         self._wal.close()
+
+        # Persist final counters so a clean shutdown's stats survive.
+        try:
+            self._save_meta()
+        except Exception:
+            pass
+
+        if self._lock_fh is not None:
+            _unlock_fd(self._lock_fh.fileno())
+            self._lock_fh.close()
+            self._lock_fh = None
