@@ -441,6 +441,35 @@ class KVStore:
 
         self._bloom_filters[index] = filter
 
+    @staticmethod
+    def _versions_size(key, versions):
+        total = 0
+        for _, value in versions:
+            val_size = _TOMBSTONE_BYTES if value is _TOMBSTONE else len(value)
+            total += len(key) + val_size
+        return total
+
+    @staticmethod
+    def _chunk_by_target_size(sorted_items, target_size):
+        chunks = []
+        chunk = []
+        chunk_size = 0
+        target_size = max(1, target_size)
+
+        for key, versions in sorted_items:
+            item_size = KVStore._versions_size(key, versions)
+            if chunk and chunk_size + item_size > target_size:
+                chunks.append(chunk)
+                chunk = []
+                chunk_size = 0
+            chunk.append((key, versions))
+            chunk_size += item_size
+
+        if chunk:
+            chunks.append(chunk)
+
+        return chunks
+
     def _compact_level(self, level):
         entries = [entry for entry in self._manifest.entries if entry["level"] == level]
 
@@ -484,10 +513,9 @@ class KVStore:
         # Step 1: write all new SST files (data, bloom, index) durably to disk
         # BEFORE touching the manifest or deleting old files. Crash before
         # manifest update = orphan new files cleaned on next boot.
-        sstable_key_count = config.MAX_L0_FILES * (10 ** (level + 1))
+        target_sstable_size = config.MAX_MEMTABLE_SIZE * (10 ** (level + 1))
         new_entries = []
-        for i in range(0, len(merged), sstable_key_count):
-            chunk = merged[i:i + sstable_key_count]
+        for chunk in KVStore._chunk_by_target_size(merged, target_sstable_size):
             self._index_counter += 1
             new_idx = self._index_counter
             self._write_sstable(new_idx, chunk)
