@@ -14,9 +14,11 @@ def test_checksum_corruption(store):
         lines = file.readlines() 
     
     for i, line in enumerate(lines):
-        if line.strip():
+        if '"k":"xander"' in line:
             lines[i] = line.replace('"k"', '"K"', 1)
             break
+    else:
+        pytest.fail("expected xander SSTable record")
 
     with open(files[0], 'w') as file: 
         file.writelines(lines)
