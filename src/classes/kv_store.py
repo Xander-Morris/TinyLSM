@@ -1,63 +1,38 @@
 import glob
-import os 
-import src.config as config 
-import src.classes.bloom_filter as bloom_filter 
-import src.classes.manifest as manifest 
+import os
+import json
+import src.config as config
+import src.classes.bloom_filter as bloom_filter
+import src.classes.manifest as manifest
 import src.classes.read_write_lock as read_write_lock
 import binascii
-import threading 
+import threading
 import heapq
 
+
 class KVStore:
-    # Static Methods
+    # Static Methods (pure helpers — no file I/O)
     @staticmethod
     def _sst_index(entry):
         return int(entry["file_name"].split("_")[1])
 
     @staticmethod
     def _parse_sstable_line(line):
-        key, seq, value, stored_checksum = line.split(" ")
-        computed_checksum = str(binascii.crc32(f"{key} {seq} {value}".encode()))
-
-        if stored_checksum != computed_checksum:
-            raise ValueError(f"Checksum mismatch for key '{key}': expected {computed_checksum}, got {stored_checksum}")
-
-        return key, int(seq), value
+        line = line.rstrip("\r\n")
+        if "\t" not in line:
+            raise ValueError(f"Malformed SSTable line: {line!r}")
+        payload, _, crc_str = line.rpartition("\t")
+        try:
+            stored_crc = int(crc_str)
+        except ValueError:
+            raise ValueError(f"Bad CRC field in SSTable line: {line!r}")
+        computed_crc = binascii.crc32(payload.encode())
+        if stored_crc != computed_crc:
+            raise ValueError(f"Checksum mismatch: expected {computed_crc}, got {stored_crc}")
+        record = json.loads(payload)
+        return record["k"], int(record["s"]), record["v"]
 
     @staticmethod
-    def _write_to_sstable_file(index, sorted_store):
-        sparse = []
-        min_key, max_key = None, None
-
-        with open(f"sst_{index}", 'w') as file:
-            key_count = 0
-
-            for key, versions in sorted_store:
-                key_count += 1
-                first_version = True
-
-                for seq, value in versions:
-                    if min_key is None:
-                        min_key = key
-                    max_key = key
-                    offset = file.tell()
-                    line = f"{key} {seq} {value}"
-                    checksum = binascii.crc32(line.encode())
-                    file.write(f"{line} {checksum}\n")
-
-                    if first_version and key_count % config.SPARSE_INDEX_N == 0:
-                        sparse.append((key, offset))
-                        first_version = False 
-
-        with open(f"sst_{index}.index", 'w') as file:
-            for key, offset in sparse:
-                file.write(f"{key} {offset}\n")
-            file.flush()
-            os.fsync(file.fileno())
-
-        return (sparse, min_key, max_key)
-
-    @staticmethod 
     def _pick_version(versions, at=None):
         if at is None:
             return versions[-1][1]
@@ -77,7 +52,6 @@ class KVStore:
 
             if key == key_at_mid:
                 versions = [(seq, value) for k, seq, value in tuples if k == key]
-
                 return KVStore._pick_version(versions, at)
             elif key < key_at_mid:
                 high = mid - 1
@@ -87,30 +61,11 @@ class KVStore:
         return None
 
     @staticmethod
-    def _build_sstable_tuples(index, index_file=False):
-        tuples = []
-        file_name = f"sst_{index}.index" if index_file else f"sst_{index}"
-
-        with open(file_name, 'r') as file:
-            for line in file:
-                line = line.strip()
-                if index_file:
-                    inner_key, value = line.split(" ")
-                    value = int(value)
-                    tuples.append((inner_key, value))
-                else:
-                    inner_key, seq, value = KVStore._parse_sstable_line(line)
-                    tuples.append((inner_key, seq, value))
-
-        return tuples
-    
-    @staticmethod 
     def _get_raw_value_from_table_at(entries, key: str, at=None):
         versions = entries.get(key)
-        
         return KVStore._pick_version(versions, at)
 
-    @staticmethod 
+    @staticmethod
     def _search_sparse_index_for_key_offset(sparse_index, key):
         low = 0
         high = len(sparse_index) - 1
@@ -119,34 +74,15 @@ class KVStore:
         while low <= high:
             mid = (low + high) // 2
 
-            if sparse_index[mid][0] <= key: 
-                low = mid + 1 
+            if sparse_index[mid][0] <= key:
+                low = mid + 1
                 found = True
             else:
                 high = mid - 1
-        
+
         offset = sparse_index[low - 1][1] if found else 0
 
-        return offset 
-
-    @staticmethod 
-    def _sstable_iter_from(index, sparse_index, start_key):
-        offset = KVStore._search_sparse_index_for_key_offset(sparse_index, start_key)
-
-        with open(f"sst_{index}", 'r') as file: 
-            file.seek(offset)
-
-            for line in file: 
-                key, seq, value = KVStore._parse_sstable_line(line.strip())
-                
-                if key < start_key:
-                    continue 
-                """ 
-                    I use yield here to pause and hand the value back to the caller instead of building
-                    all the lines and returning them. If I want only 5 lines for some reason,
-                    then I can do that with this yielding method.
-                """
-                yield (key, seq, value)
+        return offset
 
     @staticmethod
     def _memtable_iter(table):
@@ -154,42 +90,158 @@ class KVStore:
             for seq, value in versions:
                 yield (key, seq, value)
 
-    # Object-Specific Methods 
-    def __init__(self):
+    @staticmethod
+    def _parse_wal_record(line):
+        line = line.rstrip("\r\n")
+        if "\t" not in line:
+            return None
+        payload, _, crc_str = line.rpartition("\t")
+        try:
+            crc = int(crc_str)
+        except ValueError:
+            return None
+        if binascii.crc32(payload.encode()) != crc:
+            return None
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+
+    # Object-Specific Methods
+    def __init__(self, data_dir=None):
+        self._data_dir = os.path.abspath(data_dir) if data_dir else os.path.abspath(os.getcwd())
+        os.makedirs(self._data_dir, exist_ok=True)
         self._store = {}
-        self._imm_memtable = None 
+        self._imm_memtable = None
         self._imm_entries = 0
         self._entries = 0
         self._index_counter = 0
         self._wal_buffer_count = 0
         self._bytes_written_disk = 0
         self._bytes_written_user = 0
-        self._seq = 0 
+        self._seq = 0
         self._bloom_filters = {}
         self._sparse_indexes = {}
-        self._flush_thread = None 
-        self._manifest = manifest.Manifest.load() 
+        self._flush_thread = None
+        self._manifest = manifest.Manifest.load(self._data_dir)
         self._lock = read_write_lock.ReadWriteLock()
         self._load_sstables()
 
         try:
-            with open(config.LOG_FILE_NAME + ".flushing", 'r') as file:
+            with open(self._path(config.LOG_FILE_NAME + ".flushing"), 'r') as file:
                 for line in file:
-                    self._replay_line(line)
+                    if not self._replay_line(line):
+                        break
         except FileNotFoundError:
             pass
 
         try:
-            with open(config.LOG_FILE_NAME, 'r') as file:
+            with open(self._path(config.LOG_FILE_NAME), 'r') as file:
                 for line in file:
-                    self._replay_line(line)
+                    if not self._replay_line(line):
+                        break
         except FileNotFoundError:
             pass
 
-        self._wal = open(config.LOG_FILE_NAME, 'a')
+        self._wal = open(self._path(config.LOG_FILE_NAME), 'a')
+
+    def _path(self, name):
+        return os.path.join(self._data_dir, name)
+
+    # Instance file-I/O helpers
+    def _write_to_sstable_file(self, index, sorted_store):
+        sparse = []
+        min_key, max_key = None, None
+
+        with open(self._path(f"sst_{index}"), 'w') as file:
+            key_count = 0
+
+            for key, versions in sorted_store:
+                key_count += 1
+                first_version = True
+
+                for seq, value in versions:
+                    if min_key is None:
+                        min_key = key
+                    max_key = key
+                    offset = file.tell()
+                    record = {"k": key, "s": seq, "v": value}
+                    payload = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+                    checksum = binascii.crc32(payload.encode())
+                    file.write(f"{payload}\t{checksum}\n")
+
+                    if first_version and key_count % config.SPARSE_INDEX_N == 0:
+                        sparse.append((key, offset))
+                        first_version = False
+
+        with open(self._path(f"sst_{index}.index"), 'w') as file:
+            for key, offset in sparse:
+                record = {"k": key, "o": offset}
+                file.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
+            file.flush()
+            os.fsync(file.fileno())
+
+        return (sparse, min_key, max_key)
+
+    def _build_sstable_tuples(self, index, index_file=False):
+        tuples = []
+        file_name = self._path(f"sst_{index}.index") if index_file else self._path(f"sst_{index}")
+
+        with open(file_name, 'r') as file:
+            for line in file:
+                line = line.rstrip("\r\n")
+                if not line:
+                    continue
+                if index_file:
+                    record = json.loads(line)
+                    tuples.append((record["k"], int(record["o"])))
+                else:
+                    inner_key, seq, value = KVStore._parse_sstable_line(line)
+                    tuples.append((inner_key, seq, value))
+
+        return tuples
+
+    def _sstable_iter_from(self, index, sparse_index, start_key):
+        offset = KVStore._search_sparse_index_for_key_offset(sparse_index, start_key)
+
+        with open(self._path(f"sst_{index}"), 'r') as file:
+            file.seek(offset)
+
+            for line in file:
+                key, seq, value = KVStore._parse_sstable_line(line)
+
+                if key < start_key:
+                    continue
+                yield (key, seq, value)
+
+    def _search_sstable_with_index(self, index, sparse_index, key, at=None):
+        offset = KVStore._search_sparse_index_for_key_offset(sparse_index, key)
+        versions = []
+
+        with open(self._path(f"sst_{index}"), 'r') as file:
+            file.seek(offset)
+
+            for line in file:
+                inner_key, seq, value = KVStore._parse_sstable_line(line)
+
+                if key == inner_key:
+                    versions.append((seq, value))
+                elif key < inner_key:
+                    break
+
+        return KVStore._pick_version(versions, at) if versions else None
 
     # Private Methods
-    def _increment_wall_buffer_count(self):
+    def _wal_write_record(self, op, seq, key, value=None):
+        record = {"op": op, "seq": seq, "key": key}
+        if value is not None:
+            record["value"] = value
+        payload = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+        crc = binascii.crc32(payload.encode())
+        self._wal.write(f"{payload}\t{crc}\n")
+        self._increment_wal_buffer_count()
+
+    def _increment_wal_buffer_count(self):
         self._wal_buffer_count += 1
 
         if self._wal_buffer_count >= config.WAL_BUFFER_SIZE:
@@ -198,20 +250,26 @@ class KVStore:
             self._wal_buffer_count = 0
 
     def _replay_line(self, line):
-        line = line.strip()
-        sp = line.split(" ")
-        if sp[0] == "SET":
-            self._set_key_seq_value(sp[1], sp[2])
-        elif sp[0] == "DELETE":
-            self._set_key_seq_value(sp[1], config.TOMBSTONE_VALUE)
+        record = KVStore._parse_wal_record(line)
+        if record is None:
+            return False
+        seq = int(record["seq"])
+        if seq > self._seq:
+            self._seq = seq
+        key = record["key"]
+        if record["op"] == "SET":
+            self._set_key_seq_value(key, record["value"], seq)
+        elif record["op"] == "DELETE":
+            self._set_key_seq_value(key, config.TOMBSTONE_VALUE, seq)
+        return True
 
     def _write_sstable(self, index, data):
-        write_result = KVStore._write_to_sstable_file(index, data)
+        write_result = self._write_to_sstable_file(index, data)
         self._sparse_indexes[index] = write_result[0]
         self._write_bloom_filter(data, index)
-        self._bytes_written_disk += os.path.getsize(f"sst_{index}")
+        self._bytes_written_disk += os.path.getsize(self._path(f"sst_{index}"))
 
-        return write_result 
+        return write_result
 
     def _write_bloom_filter(self, items, index):
         filter = bloom_filter.BloomFilter.for_capacity(len(items), config.BLOOM_FALSE_POSITIVE_RATE)
@@ -219,7 +277,7 @@ class KVStore:
         for key, _ in items:
             filter.add(key)
 
-        with open(f"sst_{index}.bloom", 'w') as file:
+        with open(self._path(f"sst_{index}.bloom"), 'w') as file:
             file.write(filter.serialize())
             file.flush()
             os.fsync(file.fileno())
@@ -245,7 +303,7 @@ class KVStore:
             for entry in entries_list:
                 index = KVStore._sst_index(entry)
 
-                for key, seq, value in KVStore._build_sstable_tuples(index):
+                for key, seq, value in self._build_sstable_tuples(index):
                     if key not in merged:
                         merged[key] = []
                     merged[key].append((seq, value))
@@ -270,12 +328,11 @@ class KVStore:
 
         merged = sorted(surviving.items())
 
-        for entry in entries + next_entries: 
-            # Remove all files used by the index 
+        for entry in entries + next_entries:
             index = KVStore._sst_index(entry)
-            os.remove(f"sst_{index}")
-            os.remove(f"sst_{index}.bloom")
-            os.remove(f"sst_{index}.index")
+            os.remove(self._path(f"sst_{index}"))
+            os.remove(self._path(f"sst_{index}.bloom"))
+            os.remove(self._path(f"sst_{index}.index"))
             self._manifest.remove(entry["file_name"])
             self._bloom_filters.pop(index, None)
             self._sparse_indexes.pop(index, None)
@@ -296,9 +353,9 @@ class KVStore:
             next_count = sum(1 for entry in self._manifest.entries if entry["level"] == level + 1)
             level_limit = config.MAX_L0_FILES * (10 ** (level + 1))
 
-            if next_count < level_limit: 
+            if next_count < level_limit:
                 break
-            
+
             level += 1
 
     def _flush(self):
@@ -313,33 +370,33 @@ class KVStore:
         self._entries = 0
         self._wal.flush()
         self._wal.close()
-        os.rename(config.LOG_FILE_NAME, config.LOG_FILE_NAME + ".flushing")
-        self._wal = open(config.LOG_FILE_NAME, 'a')
+        os.rename(self._path(config.LOG_FILE_NAME), self._path(config.LOG_FILE_NAME + ".flushing"))
+        self._wal = open(self._path(config.LOG_FILE_NAME), 'a')
 
         def _threaded_funct():
             sorted_store = sorted(self._imm_memtable.items())
-            write_result = KVStore._write_to_sstable_file(index, sorted_store)
+            write_result = self._write_to_sstable_file(index, sorted_store)
 
             bf = bloom_filter.BloomFilter.for_capacity(len(sorted_store), config.BLOOM_FALSE_POSITIVE_RATE)
             for key, _ in sorted_store:
                 bf.add(key)
-            with open(f"sst_{index}.bloom", 'w') as file:
+            with open(self._path(f"sst_{index}.bloom"), 'w') as file:
                 file.write(bf.serialize())
                 file.flush()
                 os.fsync(file.fileno())
-            with open("seq.tmp", 'w') as file:
+            with open(self._path("seq.tmp"), 'w') as file:
                 file.write(str(self._seq))
                 file.flush()
                 os.fsync(file.fileno())
-            os.replace("seq.tmp", "seq")
+            os.replace(self._path("seq.tmp"), self._path("seq"))
 
             with self._lock.write():
                 self._sparse_indexes[index] = write_result[0]
                 self._bloom_filters[index] = bf
-                self._bytes_written_disk += os.path.getsize(f"sst_{index}")
+                self._bytes_written_disk += os.path.getsize(self._path(f"sst_{index}"))
                 self._update_manifest(0, f"sst_{index}", write_result[1], write_result[2])
                 try:
-                    os.remove(config.LOG_FILE_NAME + ".flushing")
+                    os.remove(self._path(config.LOG_FILE_NAME + ".flushing"))
                 except FileNotFoundError:
                     pass
                 l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
@@ -352,143 +409,118 @@ class KVStore:
         self._flush_thread.start()
 
     def _search_sstables(self, key, at=None):
-        sorted_entries = sorted(self._manifest.entries, 
+        sorted_entries = sorted(self._manifest.entries,
             key=lambda entry: (0, -(KVStore._sst_index(entry))) if entry["level"] == 0 else (entry["level"], 0))
 
         for entry in sorted_entries:
             if entry["level"] > 0 and (key > entry["max_key"] or key < entry["min_key"]):
-                continue 
+                continue
 
             index = KVStore._sst_index(entry)
 
             if not self._bloom_filters[index].contains(key):
-                continue 
-                
+                continue
+
             if self._sparse_indexes[index]:
-                sparse_index_result = KVStore._search_sstable_with_index(index, self._sparse_indexes[index], key, at)
+                sparse_index_result = self._search_sstable_with_index(index, self._sparse_indexes[index], key, at)
 
                 if sparse_index_result == config.TOMBSTONE_VALUE:
-                    return None 
+                    return None
 
-                if sparse_index_result is not None: 
-                    return sparse_index_result 
-                
+                if sparse_index_result is not None:
+                    return sparse_index_result
+
                 continue
             else:
-                tuples = KVStore._build_sstable_tuples(index)
+                tuples = self._build_sstable_tuples(index)
                 search_result = KVStore._binary_search(tuples, key, at)
 
                 if search_result == config.TOMBSTONE_VALUE:
-                    return None 
+                    return None
 
                 if search_result is not None:
                     return search_result
-        
-        return None 
-    
-    @staticmethod
-    def _search_sstable_with_index(index, sparse_index, key, at=None):
-        offset = KVStore._search_sparse_index_for_key_offset(sparse_index, key)
-        versions = []
 
-        with open(f"sst_{index}", 'r') as file:
-            file.seek(offset)
-
-            for line in file:
-                line = line.strip()
-                inner_key, seq, value = KVStore._parse_sstable_line(line)
-
-                if key == inner_key:
-                    versions.append((seq, value))
-                elif key < inner_key:
-                    break
-
-        return KVStore._pick_version(versions, at) if versions else None
+        return None
 
     def _load_sstables(self):
-        sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
-        sorted_file_names = sorted(sst_file_names, key=lambda f: int(f.split("_")[1])) # gets the index counter, like in sst_3, we get 3 and sort by that index with respect to the other files
+        sst_file_names = [os.path.basename(f) for f in glob.glob(self._path("sst_*")) if "." not in os.path.basename(f)]
+        sorted_file_names = sorted(sst_file_names, key=lambda f: int(f.split("_")[1]))
         index_counter = 0
 
-        try: 
-            with open("seq", 'r') as file: 
-                self._seq = int(file.read().strip()) 
+        try:
+            with open(self._path("seq"), 'r') as file:
+                self._seq = int(file.read().strip())
         except FileNotFoundError:
-            print("seq could not be opened")
+            pass
 
         for file_name in sorted_file_names:
             index_counter = int(file_name.split("_")[1])
-            
+
             try:
-                with open(f"sst_{index_counter}.bloom", 'r') as file: 
-                    line = file.read() 
+                with open(self._path(f"sst_{index_counter}.bloom"), 'r') as file:
+                    line = file.read()
                     self._bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(line)
             except FileNotFoundError:
                 print(f"Bloom filter file does not exist for index {index_counter}!")
 
             try:
-                tuples = KVStore._build_sstable_tuples(index_counter, True)
-                self._sparse_indexes[index_counter] = tuples 
+                tuples = self._build_sstable_tuples(index_counter, True)
+                self._sparse_indexes[index_counter] = tuples
             except FileNotFoundError:
                 print(f"Index file does not exist for index {index_counter}!")
 
         self._index_counter = index_counter
 
-    def _set_key_seq_value(self, key: str, value: str):
-        self._seq += 1
+    def _set_key_seq_value(self, key: str, value: str, seq: int):
         if key not in self._store:
             self._store[key] = []
-        self._store[key].append((self._seq, value))
+        self._store[key].append((seq, value))
 
     def _get_prev_value(self, key: str):
         versions = self._store.get(key)
 
         if versions:
             return versions[-1][1]
-        
+
         if self._imm_memtable is None:
-            return None 
+            return None
 
         versions = self._imm_memtable.get(key)
 
         if versions:
             return versions[-1][1]
-        
-        return None 
 
-    def _set(self, key: str, value: str):
+        return None
+
+    def _set(self, key: str, value: str, seq: int):
         prev_value = self._get_prev_value(key)
-        self._set_key_seq_value(key, value)
+        self._set_key_seq_value(key, value, seq)
         increment = len(key) + len(value)
 
         if prev_value is None or prev_value == config.TOMBSTONE_VALUE:
             self._entries += increment
         else:
-            # Overwriting a real value, so adjust by the difference in value length. 
             decrement = (len(value) - len(prev_value))
             self._entries += decrement
 
-        # I want to track the total bytes the user wrote, not the net bytes they wrote. 
         self._bytes_written_user += increment
 
         if self._entries < config.MAX_MEMTABLE_SIZE:
             return
 
-        # Do the flush. 
         self._flush()
 
-    def _delete(self, key: str):
+    def _delete(self, key: str, seq: int):
         prev_value = self._get_prev_value(key)
-        self._set_key_seq_value(key, config.TOMBSTONE_VALUE)
+        self._set_key_seq_value(key, config.TOMBSTONE_VALUE, seq)
 
-        # I only want to subtract the entries count when it was a valid value to begin with.
         if prev_value is not None and prev_value != config.TOMBSTONE_VALUE:
             self._entries -= (len(key) + len(prev_value))
 
-    # Public Methods 
+    # Public Methods
     # Read Operations
     def get(self, key: str, at=None):
-        # Phase 1: check memtables and snapshot SSTable metadata under read lock (no file I/O).
         with self._lock.read():
             raw_value = None
 
@@ -512,16 +544,14 @@ class KVStore:
                 index = KVStore._sst_index(entry)
                 search_plan.append((index, self._bloom_filters[index], self._sparse_indexes[index]))
 
-        # Phase 2: file I/O outside the lock. Python releases the GIL during file syscalls,
-        # so multiple threads can truly run in parallel here.
         for index, bf, sparse_idx in search_plan:
             if not bf.contains(key):
                 continue
 
             if sparse_idx:
-                result = KVStore._search_sstable_with_index(index, sparse_idx, key, at)
+                result = self._search_sstable_with_index(index, sparse_idx, key, at)
             else:
-                tuples = KVStore._build_sstable_tuples(index)
+                tuples = self._build_sstable_tuples(index)
                 result = KVStore._binary_search(tuples, key, at)
 
             if result == config.TOMBSTONE_VALUE:
@@ -533,13 +563,13 @@ class KVStore:
 
     def scan(self, start: str, end: str, at=None):
         return list(self.iter(start, end, at))
-    
+
     def iter(self, start: str, end: str, at=None):
         with self._lock.read():
             sources = []
             for entry in sorted(self._manifest.entries, key=lambda e: (e["level"], -KVStore._sst_index(e))):
                 index = KVStore._sst_index(entry)
-                sources.append(KVStore._sstable_iter_from(index, self._sparse_indexes[index], start))
+                sources.append(self._sstable_iter_from(index, self._sparse_indexes[index], start))
             if self._imm_memtable is not None:
                 sources.append(KVStore._memtable_iter(self._imm_memtable))
             sources.append(KVStore._memtable_iter(self._store))
@@ -568,17 +598,17 @@ class KVStore:
 
             if seen_key is not None and should_yield(best_value, best_seq):
                 yield seen_key, best_value
-        
+
     def stats(self):
         with self._lock.read():
             mp = {}
 
-            for entry in self._manifest.entries: 
+            for entry in self._manifest.entries:
                 mp[entry["level"]] = mp.get(entry["level"], 0) + 1
-            
+
             sstable_count = len(self._manifest.entries)
             total_disk_size = 0
-            sst_file_names = [f for f in glob.glob("sst_*") if "." not in f]
+            sst_file_names = [f for f in glob.glob(self._path("sst_*")) if "." not in os.path.basename(f)]
 
             for file_name in sst_file_names:
                 total_disk_size += os.path.getsize(file_name)
@@ -588,31 +618,32 @@ class KVStore:
             write_amplification = self._bytes_written_disk / self._bytes_written_user if self._bytes_written_user != 0 else 0
 
             return {
-                "sstable_count": sstable_count, 
-                "sstables_per_level": mp, 
+                "sstable_count": sstable_count,
+                "sstables_per_level": mp,
                 "total_size_bytes": total_disk_size,
                 "memtable_size_bytes": memtable_size,
                 "memtable_keys": keys_num,
                 "bytes_written_disk": self._bytes_written_disk,
                 "write_amplification": write_amplification,
             }
-        
+
     def dump(self):
-        # "\U0010FFFF" is the largest possible Unicode character to make the range cover all keys.
         return dict(self.scan("", "\U0010FFFF"))
 
     # Write Operations
     def set(self, key: str, value: str):
         with self._lock.write():
-            self._wal.write(f"SET {key} {value}\n")
-            self._increment_wall_buffer_count()
-            self._set(key, value)
+            self._seq += 1
+            seq = self._seq
+            self._wal_write_record("SET", seq, key, value)
+            self._set(key, value, seq)
 
     def delete(self, key: str):
         with self._lock.write():
-            self._wal.write(f"DELETE {key}\n")
-            self._increment_wall_buffer_count()
-            self._delete(key)
+            self._seq += 1
+            seq = self._seq
+            self._wal_write_record("DELETE", seq, key)
+            self._delete(key, seq)
 
     # Close
     def close(self):
