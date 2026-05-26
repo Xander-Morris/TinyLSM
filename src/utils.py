@@ -1,10 +1,22 @@
-import os 
+import shlex
+
 
 def process_line(store, line):
-    line = line.strip() 
-    sp = line.split(" ")
+    line = line.strip()
+    if not line:
+        return
+
+    try:
+        sp = shlex.split(line)
+    except ValueError as e:
+        print(f"Parse error: {e}")
+        return
+
+    if not sp:
+        return
+
     operation = sp[0]
-    
+
     if operation == "SET":
         if len(sp) < 3:
             print("3 arguments are required for SET!")
@@ -15,7 +27,7 @@ def process_line(store, line):
             print("3 arguments are required for SCAN!")
         else:
             tuples = store.scan(sp[1], sp[2])
-            for key, value in tuples: 
+            for key, value in tuples:
                 print(f"Key: {key}, value: {value}")
     elif operation == "DELETE":
         if len(sp) < 2:
