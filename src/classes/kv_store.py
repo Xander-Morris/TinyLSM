@@ -44,7 +44,7 @@ else:
             pass
 
 
-# Identity-checked sentinel — distinct from any user value.
+# Identity-checked sentinel - distinct from any user value.
 class _TombstoneType:
     _instance = None
 
@@ -62,7 +62,7 @@ _TOMBSTONE_BYTES = 1  # accounting weight for tombstone marker in memtable
 
 
 class KVStore:
-    # Static Methods (pure helpers — no file I/O)
+    # Static Methods (pure helpers - no file I/O)
     @staticmethod
     def _sst_index(entry):
         return int(entry["file_name"].split("_")[1])
@@ -180,10 +180,15 @@ class KVStore:
 
         # Acquire process-level exclusive lock on this data directory.
         # Another process holding the lock = refuse to open (would corrupt).
-        self._lock_fh = open(self._path("LOCK"), 'wb+')
-        self._lock_fh.write(b'X')
-        self._lock_fh.flush()
-        self._lock_fh.seek(0)
+        self._lock_fh = None
+        try:
+            self._lock_fh = open(self._path("LOCK"), 'a+b')
+            self._lock_fh.seek(0)
+        except OSError as exc:
+            if self._lock_fh is not None:
+                self._lock_fh.close()
+                self._lock_fh = None
+            raise RuntimeError(f"Could not open lock file for {self._data_dir}") from exc
         if not _try_lock_fd(self._lock_fh.fileno()):
             self._lock_fh.close()
             self._lock_fh = None
@@ -202,32 +207,42 @@ class KVStore:
         self._sparse_indexes = {}
         self._flush_thread = None
         self._flush_drained = threading.Condition()
-        self._manifest = manifest.Manifest.load(self._data_dir)
-        self._lock = read_write_lock.ReadWriteLock()
-        self._cleanup_orphan_sst_files()
-        self._load_meta()
-        self._load_sstables()
-
         try:
-            with open(self._path(config.LOG_FILE_NAME + ".flushing"), 'r', encoding='utf-8') as file:
-                for line in file:
-                    if not self._replay_line(line):
-                        break
-        except FileNotFoundError:
-            pass
+            self._manifest = manifest.Manifest.load(self._data_dir)
+            self._lock = read_write_lock.ReadWriteLock()
+            self._cleanup_orphan_sst_files()
+            self._load_meta()
+            self._load_sstables()
 
-        try:
-            with open(self._path(config.LOG_FILE_NAME), 'r', encoding='utf-8') as file:
-                for line in file:
-                    if not self._replay_line(line):
-                        break
-        except FileNotFoundError:
-            pass
+            try:
+                with open(self._path(config.LOG_FILE_NAME + ".flushing"), 'r', encoding='utf-8') as file:
+                    for line in file:
+                        if not self._replay_line(line):
+                            break
+            except FileNotFoundError:
+                pass
 
-        self._wal = open(self._path(config.LOG_FILE_NAME), 'a', encoding='utf-8')
+            try:
+                with open(self._path(config.LOG_FILE_NAME), 'r', encoding='utf-8') as file:
+                    for line in file:
+                        if not self._replay_line(line):
+                            break
+            except FileNotFoundError:
+                pass
+
+            self._wal = open(self._path(config.LOG_FILE_NAME), 'a', encoding='utf-8')
+        except Exception:
+            self._release_directory_lock()
+            raise
 
     def _path(self, name):
         return os.path.join(self._data_dir, name)
+
+    def _release_directory_lock(self):
+        if self._lock_fh is not None:
+            _unlock_fd(self._lock_fh.fileno())
+            self._lock_fh.close()
+            self._lock_fh = None
 
     def _meta_path(self):
         return self._path("meta")
@@ -478,7 +493,7 @@ class KVStore:
             self._write_sstable(new_idx, chunk)
             new_entries.append((level + 1, f"sst_{new_idx}", chunk[0][0], chunk[-1][0]))
 
-        # Step 2: single atomic manifest update — add new and remove old together.
+        # Step 2: single atomic manifest update - add new and remove old together.
         for lvl, fname, mink, maxk in new_entries:
             self._manifest.add(lvl, fname, mink, maxk)
         for entry in entries + next_entries:
@@ -538,8 +553,6 @@ class KVStore:
                     file.flush()
                     os.fsync(file.fileno())
 
-                self._save_meta()
-
                 with self._lock.write():
                     self._sparse_indexes[index] = write_result[0]
                     self._bloom_filters[index] = bf
@@ -555,6 +568,10 @@ class KVStore:
                         self._compact()
                     self._imm_memtable = None
                     self._imm_entries = 0
+                    try:
+                        self._save_meta()
+                    except Exception:
+                        pass
             finally:
                 # Wake any writers parked on back-pressure.
                 with self._flush_drained:
@@ -605,7 +622,7 @@ class KVStore:
             self._flush()
 
     def _wait_for_flush_to_drain(self):
-        """Block until the in-flight flush completes — prevents memtable
+        """Block until the in-flight flush completes - prevents memtable
         from growing unboundedly when writes outpace flush throughput."""
         with self._flush_drained:
             while self._imm_memtable is not None:
@@ -779,7 +796,4 @@ class KVStore:
         except Exception:
             pass
 
-        if self._lock_fh is not None:
-            _unlock_fd(self._lock_fh.fileno())
-            self._lock_fh.close()
-            self._lock_fh = None
+        self._release_directory_lock()

@@ -151,6 +151,12 @@ def test_iter(store):
     result = list(store.iter("foo", "xander"))
     assert result == [("foo", "bar"), ("xander", "sadie")]
 
+def test_iter_materializes_at_call_time(store):
+    store.set("foo", "bar")
+    result = store.iter("foo", "xander")
+    store.set("xander", "sadie")
+    assert list(result) == [("foo", "bar")]
+
 def test_iter_snapshot_after_flush(store):
     store.set("foo", "bar")
     seq1 = store._seq
