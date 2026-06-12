@@ -215,7 +215,7 @@ python -m src.benchmark
 
 The benchmark script creates a temporary store, runs writes, single-threaded reads, 4-thread reads, and misses, then prints ops/sec for your machine.
 
-Example output with `N=100000`:
+Example output with certain configurations on my personal computer:
 
 ```text
 Doing the benchmarks with N=100000, MAX_MEMTABLE_SIZE=1048576, MAX_L0_FILES=8, WAL_BUFFER_SIZE=1000...
