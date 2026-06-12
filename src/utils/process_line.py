@@ -1,6 +1,5 @@
 import shlex
 
-
 def process_line(store, line):
     line = line.strip()
     if not line:

@@ -1,7 +1,6 @@
 import src.utils as utils
 from src.classes import kv_store
 
-
 def main():
     store = kv_store.KVStore()
 
@@ -20,7 +19,6 @@ def main():
         pass
     finally:
         store.close()
-
 
 if __name__ == "__main__":
     main()
