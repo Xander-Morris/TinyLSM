@@ -2,6 +2,7 @@ import glob
 import os
 import sys
 import json
+from src.classes.tombstone import TombstoneType
 import src.config as config
 import src.classes.bloom_filter as bloom_filter
 import src.classes.manifest as manifest
@@ -42,23 +43,8 @@ else:
         except OSError:
             pass
 
-
-# Tombstone to mark "deletion"
-class _TombstoneType:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __repr__(self):
-        return "<TOMBSTONE>"
-
-
-_TOMBSTONE = _TombstoneType()
+_TOMBSTONE = TombstoneType()
 _TOMBSTONE_BYTES = 1  # Accounting weight for tombstone marker in memtable
-
 
 class KVStore:
     # Static Methods (pure helpers with no file I/O)
