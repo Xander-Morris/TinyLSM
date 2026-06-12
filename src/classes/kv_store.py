@@ -10,8 +10,7 @@ import binascii
 import threading
 import heapq
 
-
-# Cross-platform exclusive file lock (advisory).
+# Cross-platform exclusive file lock
 if sys.platform == "win32":
     import msvcrt
 
@@ -44,7 +43,7 @@ else:
             pass
 
 
-# Identity-checked sentinel - distinct from any user value.
+# Tombstone to mark "deletion"
 class _TombstoneType:
     _instance = None
 
@@ -58,11 +57,11 @@ class _TombstoneType:
 
 
 _TOMBSTONE = _TombstoneType()
-_TOMBSTONE_BYTES = 1  # accounting weight for tombstone marker in memtable
+_TOMBSTONE_BYTES = 1  # Accounting weight for tombstone marker in memtable
 
 
 class KVStore:
-    # Static Methods (pure helpers - no file I/O)
+    # Static Methods (pure helpers with no file I/O)
     @staticmethod
     def _sst_index(entry):
         return int(entry["file_name"].split("_")[1])
@@ -510,9 +509,11 @@ class KVStore:
 
         merged = sorted(surviving.items())
 
-        # Step 1: write all new SST files (data, bloom, index) durably to disk
-        # BEFORE touching the manifest or deleting old files. Crash before
-        # manifest update = orphan new files cleaned on next boot.
+        """
+            Step 1: write all new SST files (data, bloom, index) durably to disk
+            BEFORE touching the manifest or deleting old files. Crash before
+            manifest update = orphan new files cleaned on next boot.
+        """
         target_sstable_size = config.MAX_MEMTABLE_SIZE * (10 ** (level + 1))
         new_entries = []
         for chunk in KVStore._chunk_by_target_size(merged, target_sstable_size):
@@ -701,9 +702,11 @@ class KVStore:
         return self._materialize_range(start, end, at)
 
     def iter(self, start: str, end: str, at=None):
-        # Materialize results inside the read lock so callers can safely call
-        # other store methods while iterating. The yielding-while-locked pattern
-        # would deadlock on any nested write call from the same thread.
+        """
+            Materialize results inside the read lock so callers can safely call
+            other store methods while iterating. The yielding-while-locked pattern
+            would deadlock on any nested write call from the same thread.
+        """
         return iter(self._materialize_range(start, end, at))
 
     def _materialize_range(self, start: str, end: str, at=None):

@@ -2,7 +2,6 @@ import math
 import hashlib
 from bitarray import bitarray
 
-
 class BloomFilter:
     @staticmethod
     def for_capacity(n, false_positive_rate):
@@ -42,8 +41,6 @@ class BloomFilter:
         size = max(1, size)
         num_hashes = max(1, num_hashes)
         self._bits = bitarray(size)
-        # bitarray(size) does NOT zero-initialize — bits are garbage until setall.
-        # Without this, every fresh bloom has spurious 1-bits → inflated FP rate.
         self._bits.setall(0)
         self._num_hashes = num_hashes
 
@@ -55,8 +52,10 @@ class BloomFilter:
     def contains(self, key):
         for i in range(self._num_hashes):
             idx = self._hash_index(key, i)
+
             if not self._bits[idx]:
                 return False
+            
         return True
 
     def serialize(self):
