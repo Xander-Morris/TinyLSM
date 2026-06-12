@@ -475,8 +475,10 @@ class KVStore:
             self._flush()
 
     def _wait_for_flush_to_drain(self):
-        """Block until the in-flight flush completes - prevents memtable
-        from growing unboundedly when writes outpace flush throughput."""
+        """
+            Blocks until the in-flight flush completes, which prevents the memtable
+            from growing unboundedly when writes outpace flush throughput.
+        """
         with self._flush_drained:
             while self._imm_memtable is not None:
                 self._flush_drained.wait()
