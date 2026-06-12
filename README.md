@@ -218,11 +218,11 @@ The benchmark script creates a temporary store, runs writes, single-threaded rea
 Example output with `N=100000`:
 
 ```text
-Doing the benchmarks with N=100000...
-Writes: 100000 ops in 0.37s -> 272338 ops/sec
-Reads (1 thread):  100000 ops in 0.21s -> 467495 ops/sec
-Reads (4 threads): 100000 ops in 0.20s -> 489054 ops/sec
-Misses: 100000 ops in 0.94s -> 106651 ops/sec
+Doing the benchmarks with N=100000, MAX_MEMTABLE_SIZE=1048576, MAX_L0_FILES=8, WAL_BUFFER_SIZE=1000...
+Writes: 100000 ops in 0.64s -> 155594 ops/sec
+Reads (1 thread):  100000 ops in 0.18s -> 558577 ops/sec
+Reads (4 threads): 100000 ops in 0.19s -> 519888 ops/sec
+Misses: 100000 ops in 0.19s -> 514599 ops/sec
 ```
 
 ## Tests
