@@ -1,0 +1,33 @@
+import binascii
+import json
+
+def parse_sparse_index_line(line):
+    line = line.rstrip("\r\n")
+    if "\t" not in line:
+        raise ValueError(f"Malformed sparse index line: {line!r}")
+    payload, _, crc_str = line.rpartition("\t")
+    try:
+        stored_crc = int(crc_str)
+    except ValueError:
+        raise ValueError(f"Bad CRC in sparse index line: {line!r}")
+    if binascii.crc32(payload.encode("utf-8")) != stored_crc:
+        raise ValueError(f"Sparse index checksum mismatch: {line!r}")
+    record = json.loads(payload)
+    return record["k"], int(record["o"])
+
+def search_sparse_index_for_key_offset(sparse_index, key):
+    low = 0
+    high = len(sparse_index) - 1
+    found = False
+
+    while low <= high:
+        mid = (low + high) // 2
+
+        if sparse_index[mid][0] <= key:
+            low = mid + 1
+            found = True
+        else:
+            high = mid - 1
+
+    offset = sparse_index[low - 1][1] if found else 0
+    return offset

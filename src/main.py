@@ -1,4 +1,4 @@
-import src.utils as utils
+from src.utils.process_line import process_line
 from src.classes import kv_store
 
 def main():
@@ -11,7 +11,7 @@ def main():
             if command.strip() == "EXIT":
                 break
 
-            result = utils.process_line(store, command)
+            result = process_line(store, command)
 
             if result is not None:
                 print(result)
