@@ -4,7 +4,7 @@ from bitarray import bitarray
 
 class BloomFilter:
     @staticmethod
-    def for_capacity(n: int, false_positive_rate: int):
+    def for_capacity(n: int, false_positive_rate: float):
         """
             I use this to determine the optimal bit-array size (m) and number of hash functions (k) to use to store
             a specific number of items (n) while maintaining a target false positive rate.  
