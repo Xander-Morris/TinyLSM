@@ -66,7 +66,13 @@ def _send_heartbeats():
 
 
 def _start_election():
-    """Run a pre-vote and, if viable, an election for local leadership."""
+    """Run an election for local leadership after a heartbeat timeout.
+
+    The previous pre-vote gate could livelock two followers: the first follower
+    reset after the second denied an early pre-vote, then denied the second
+    follower for the same reason.  Starting the normal, term-based election
+    directly lets the randomized election deadlines break that cycle.
+    """
     def _send_vote_requests_to_all_other_nodes(vote_term, prevote=False):
         """Collect enough pre-votes or votes to form the current majority."""
         votes = 1
@@ -97,13 +103,7 @@ def _start_election():
         return votes >= majority
 
     with ctx.state:
-        pre_term = ctx.state.term
-
-    if not _send_vote_requests_to_all_other_nodes(pre_term + 1, prevote=True):
-        return
-
-    with ctx.state:
-        if ctx.state.term != pre_term:
+        if ctx.state.leader == ctx.my_url:
             return
         ctx.state.term += 1
         ctx.state.voted_for = ctx.my_url
@@ -116,6 +116,7 @@ def _start_election():
         with ctx.state:
             if ctx.state.term == my_term:
                 ctx.state.leader = ctx.my_url
+                ctx.state.last_heartbeat = time.time()
         threading.Thread(target=_send_heartbeats, daemon=True).start()
 
 if __name__ == "__main__":
