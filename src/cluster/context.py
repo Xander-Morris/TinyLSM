@@ -108,8 +108,9 @@ def _handle_operation(operation, key, value):
 
 def _do_compaction(current_index):
     """Snapshot local state and truncate the replicated log at ``current_index``."""
-    snapshot_data = store.dump()
-    _write_snapshot(current_index, snapshot_data)
+    if store:
+        snapshot_data = store.dump()
+        _write_snapshot(current_index, snapshot_data)
     with state:
         state.log.clear()
     with open(REPLICATION_LOG_FILE, 'w') as f:
