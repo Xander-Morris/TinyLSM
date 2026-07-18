@@ -18,6 +18,16 @@ def parse_sparse_index_line(line):
     record = json.loads(payload)
     return record["k"], int(record["o"])
 
+def load_sparse_index(store_path, index):
+    """Read a sparse-index sidecar file into a list of ``(key, offset)`` tuples."""
+    tuples = []
+    with open(store_path(f"sst_{index}.index"), 'r', encoding='utf-8') as file:
+        for line in file:
+            if not line.strip():
+                continue
+            tuples.append(parse_sparse_index_line(line))
+    return tuples
+
 def search_sparse_index_for_key_offset(sparse_index, key):
     """Return the nearest indexed byte offset at or before ``key``."""
     low = 0

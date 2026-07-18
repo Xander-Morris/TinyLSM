@@ -6,7 +6,6 @@ owns recovery, compaction, and the snapshot-pinning rules that preserve
 historical versions while a caller is reading them.
 """
 
-import binascii
 import glob
 import heapq
 import json
@@ -21,14 +20,18 @@ import src.classes.read_write_lock as read_write_lock
 import src.config as config
 from src.classes.tombstone import TombstoneType
 from src.utils.file_lock import try_lock_fd, unlock_fd
-from src.utils.sstable import sst_index, parse_sstable_line, binary_search
-from src.utils.sparse_index import (
-    parse_sparse_index_line,
-    search_sparse_index_for_key_offset,
+from src.utils.sstable import (
+    sst_index,
+    binary_search,
+    write_to_sstable_file,
+    read_sstable_tuples,
+    iter_sstable_from,
+    search_sstable_with_index,
+    cleanup_orphan_sst_files,
 )
-from src.utils.wal import parse_wal_record
+from src.utils.sparse_index import load_sparse_index
+from src.utils.wal import parse_wal_record, format_wal_record, load_wal
 from src.utils.memtable import memtable_iter, get_raw_value_from_table_at
-from src.utils.versioning import pick_version
 from src.utils.compaction import chunk_by_target_size
 
 _TOMBSTONE = TombstoneType()
@@ -76,6 +79,7 @@ class KVStore:
         self._bytes_written_disk = 0
         self._bytes_written_user = 0
         self._seq = 0
+        self._wal_counter_index = 1 # current index for wal file name, like wal-1.log if index is 1
         self._bloom_filters = {}
         self._sparse_indexes = {}
         self._flush_thread = None
@@ -87,14 +91,7 @@ class KVStore:
             self._cleanup_orphan_sst_files()
             self._load_meta()
             self._load_sstables()
-
-            try:
-                with open(self._path(config.LOG_FILE_NAME + ".flushing"), 'r', encoding='utf-8') as file:
-                    for line in file:
-                        if not self._replay_line(line):
-                            break
-            except FileNotFoundError:
-                pass
+            load_wal(self._path)
 
             try:
                 with open(self._path(config.LOG_FILE_NAME), 'r', encoding='utf-8') as file:
@@ -194,11 +191,13 @@ class KVStore:
             self._seq = int(meta.get("seq", 0))
             self._bytes_written_disk = int(meta.get("bytes_written_disk", 0))
             self._bytes_written_user = int(meta.get("bytes_written_user", 0))
+            self._wal_counter_index = int(meta.get("wal_counter_index", 1))
         except (TypeError, ValueError):
             # Corrupt counters — fall back to defaults rather than crash init.
             self._seq = 0
             self._bytes_written_disk = 0
             self._bytes_written_user = 0
+            self._wal_counter_index = 1
 
     def _save_meta(self):
         """Atomically persist sequence and write-accounting counters."""
@@ -206,6 +205,7 @@ class KVStore:
             "seq": self._seq,
             "bytes_written_disk": self._bytes_written_disk,
             "bytes_written_user": self._bytes_written_user,
+            "wal_counter_index": self._wal_counter_index,
         }
         tmp = self._path("meta.tmp")
         with open(tmp, 'w', encoding='utf-8') as file:
@@ -221,124 +221,11 @@ class KVStore:
         files behind.  The manifest is the source of truth for published data.
         """
         expected = {sst_index(entry) for entry in self._manifest.entries}
-        on_disk = set()
-        for path in glob.glob(self._path("sst_*")):
-            base = os.path.basename(path)
-            stem = base.split(".", 1)[0]
-            try:
-                on_disk.add(int(stem.split("_", 1)[1]))
-            except (ValueError, IndexError):
-                continue
-
-        for idx in on_disk - expected:
-            for ext in ("", ".bloom", ".index"):
-                try:
-                    os.remove(self._path(f"sst_{idx}{ext}"))
-                except FileNotFoundError:
-                    pass
-
-    def _write_to_sstable_file(self, index, sorted_store):
-        """Write one sorted SSTable and its sparse-index sidecar durably."""
-        sparse = []
-        min_key, max_key = None, None
-
-        with open(self._path(f"sst_{index}"), 'w', encoding='utf-8') as file:
-            key_count = 0
-
-            for key, versions in sorted_store:
-                key_count += 1
-                first_version = True
-
-                for seq, value in versions:
-                    if min_key is None:
-                        min_key = key
-                    max_key = key
-                    offset = file.tell()
-                    record = {"k": key, "s": seq}
-                    if value is _TOMBSTONE:
-                        record["t"] = True
-                    else:
-                        record["v"] = value
-                    payload = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
-                    checksum = binascii.crc32(payload.encode("utf-8"))
-                    file.write(f"{payload}\t{checksum}\n")
-
-                    if first_version and key_count % config.SPARSE_INDEX_N == 0:
-                        sparse.append((key, offset))
-                        first_version = False
-
-            file.flush()
-            os.fsync(file.fileno())
-
-        with open(self._path(f"sst_{index}.index"), 'w', encoding='utf-8') as file:
-            for key, offset in sparse:
-                record = {"k": key, "o": offset}
-                payload = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
-                crc = binascii.crc32(payload.encode("utf-8"))
-                file.write(f"{payload}\t{crc}\n")
-            file.flush()
-            os.fsync(file.fileno())
-
-        return (sparse, min_key, max_key)
-
-    def _build_sstable_tuples(self, index, index_file=False):
-        """Read one SSTable or sparse-index sidecar into parsed tuples."""
-        tuples = []
-        file_name = self._path(f"sst_{index}.index") if index_file else self._path(f"sst_{index}")
-
-        with open(file_name, 'r', encoding='utf-8') as file:
-            for line in file:
-                if not line.strip():
-                    continue
-                if index_file:
-                    k, offset = parse_sparse_index_line(line)
-                    tuples.append((k, offset))
-                else:
-                    inner_key, seq, value = parse_sstable_line(line)
-                    tuples.append((inner_key, seq, value))
-
-        return tuples
-
-    def _sstable_iter_from(self, index, sparse_index, start_key):
-        """Yield records from an SSTable, seeking near ``start_key`` first."""
-        offset = search_sparse_index_for_key_offset(sparse_index, start_key)
-
-        with open(self._path(f"sst_{index}"), 'r', encoding='utf-8') as file:
-            file.seek(offset)
-
-            for line in file:
-                key, seq, value = parse_sstable_line(line)
-
-                if key < start_key:
-                    continue
-                yield (key, seq, value)
-
-    def _search_sstable_with_index(self, index, sparse_index, key, at=None):
-        """Find the version of ``key`` visible at ``at`` in one SSTable."""
-        offset = search_sparse_index_for_key_offset(sparse_index, key)
-        versions = []
-
-        with open(self._path(f"sst_{index}"), 'r', encoding='utf-8') as file:
-            file.seek(offset)
-
-            for line in file:
-                inner_key, seq, value = parse_sstable_line(line)
-
-                if key == inner_key:
-                    versions.append((seq, value))
-                elif key < inner_key:
-                    break
-
-        return pick_version(versions, at) if versions else None
+        cleanup_orphan_sst_files(self._path, expected)
 
     def _wal_write_record(self, op, seq, key, value=None):
         """Append one checksummed mutation record to the open WAL."""
-        record = {"op": op, "seq": seq, "key": key}
-        if value is not None:
-            record["value"] = value
-        payload = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
-        crc = binascii.crc32(payload.encode("utf-8"))
-        self._wal.write(f"{payload}\t{crc}\n")
+        self._wal.write(format_wal_record(op, seq, key, value))
         self._increment_wal_buffer_count()
 
     def _increment_wal_buffer_count(self):
@@ -367,7 +254,7 @@ class KVStore:
 
     def _write_sstable(self, index, data):
         """Write an SSTable, then publish its in-memory search sidecars."""
-        write_result = self._write_to_sstable_file(index, data)
+        write_result = write_to_sstable_file(self._path, index, data)
         self._sparse_indexes[index] = write_result[0]
         self._write_bloom_filter(data, index)
         self._bytes_written_disk += os.path.getsize(self._path(f"sst_{index}"))
@@ -376,17 +263,9 @@ class KVStore:
 
     def _write_bloom_filter(self, items, index):
         """Build and persist the bloom filter used to skip SSTable reads."""
-        filter = bloom_filter.BloomFilter.for_capacity(len(items), config.BLOOM_FALSE_POSITIVE_RATE)
-
-        for key, _ in items:
-            filter.add(key)
-
-        with open(self._path(f"sst_{index}.bloom"), 'w', encoding='utf-8') as file:
-            file.write(filter.serialize())
-            file.flush()
-            os.fsync(file.fileno())
-
-        self._bloom_filters[index] = filter
+        self._bloom_filters[index] = bloom_filter.write_bloom_filter(
+            self._path, index, items, config.BLOOM_FALSE_POSITIVE_RATE
+        )
 
     def _compact_level(self, level):
         """Merge one level into the next while preserving pinned snapshots.
@@ -409,7 +288,7 @@ class KVStore:
             for entry in entries_list:
                 index = sst_index(entry)
 
-                for key, seq, value in self._build_sstable_tuples(index):
+                for key, seq, value in read_sstable_tuples(self._path, index):
                     if key not in merged:
                         merged[key] = []
                     merged[key].append((seq, value))
@@ -498,7 +377,9 @@ class KVStore:
         self._wal.flush()
         os.fsync(self._wal.fileno())
         self._wal.close()
-        os.rename(self._path(config.LOG_FILE_NAME), self._path(config.LOG_FILE_NAME + ".flushing"))
+        wal_file_name = f"wal-{self._wal_counter_index}.log"
+        self._wal_counter_index += 1 # increment index for file name of next WAL that is written to
+        os.rename(self._path(config.LOG_FILE_NAME), self._path(wal_file_name))
         self._wal = open(self._path(config.LOG_FILE_NAME), 'a', encoding='utf-8')
 
         def _threaded_funct():
@@ -507,15 +388,8 @@ class KVStore:
                 if not self._imm_memtable:
                     return
                 sorted_store = sorted(self._imm_memtable.items())
-                write_result = self._write_to_sstable_file(index, sorted_store)
-
-                bf = bloom_filter.BloomFilter.for_capacity(len(sorted_store), config.BLOOM_FALSE_POSITIVE_RATE)
-                for key, _ in sorted_store:
-                    bf.add(key)
-                with open(self._path(f"sst_{index}.bloom"), 'w', encoding='utf-8') as file:
-                    file.write(bf.serialize())
-                    file.flush()
-                    os.fsync(file.fileno())
+                write_result = write_to_sstable_file(self._path, index, sorted_store)
+                bf = bloom_filter.write_bloom_filter(self._path, index, sorted_store, config.BLOOM_FALSE_POSITIVE_RATE)
 
                 with self._lock.write():
                     self._sparse_indexes[index] = write_result[0]
@@ -524,7 +398,7 @@ class KVStore:
                     self._manifest.add(0, f"sst_{index}", write_result[1], write_result[2])
                     self._manifest.save()
                     try:
-                        os.remove(self._path(config.LOG_FILE_NAME + ".flushing"))
+                        os.remove(self._path(wal_file_name))
                     except FileNotFoundError:
                         pass
                     l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
@@ -553,13 +427,12 @@ class KVStore:
                 max_index = index_counter
 
             try:
-                with open(self._path(f"sst_{index_counter}.bloom"), 'r', encoding='utf-8') as file:
-                    self._bloom_filters[index_counter] = bloom_filter.BloomFilter.deserialize(file.read())
+                self._bloom_filters[index_counter] = bloom_filter.load_bloom_filter(self._path, index_counter)
             except FileNotFoundError:
                 raise RuntimeError(f"Bloom filter file missing for SST {index_counter} referenced by manifest")
 
             try:
-                self._sparse_indexes[index_counter] = self._build_sstable_tuples(index_counter, True)
+                self._sparse_indexes[index_counter] = load_sparse_index(self._path, index_counter)
             except FileNotFoundError:
                 raise RuntimeError(f"Sparse index file missing for SST {index_counter} referenced by manifest")
 
@@ -628,9 +501,9 @@ class KVStore:
 
                 sparse_idx = self._sparse_indexes[index]
                 if sparse_idx:
-                    result = self._search_sstable_with_index(index, sparse_idx, key, at)
+                    result = search_sstable_with_index(self._path, index, sparse_idx, key, at)
                 else:
-                    tuples = self._build_sstable_tuples(index)
+                    tuples = read_sstable_tuples(self._path, index)
                     result = binary_search(tuples, key, at)
 
                 if result is _TOMBSTONE:
@@ -659,7 +532,7 @@ class KVStore:
             sources = []
             for entry in sorted(self._manifest.entries, key=lambda e: (e["level"], -sst_index(e))):
                 index = sst_index(entry)
-                sources.append(self._sstable_iter_from(index, self._sparse_indexes[index], start))
+                sources.append(iter_sstable_from(self._path, index, self._sparse_indexes[index], start))
             if self._imm_memtable is not None:
                 sources.append(memtable_iter(self._imm_memtable))
             sources.append(memtable_iter(self._store))
@@ -708,10 +581,18 @@ class KVStore:
                 total_disk_size += os.path.getsize(file_name)
 
             memtable_size = self._entries + self._imm_entries
-            keys_num = sum(
-                1 for _, versions in self._store.items()
-                if versions[-1][1] is not _TOMBSTONE and versions[-1][1] is not None
-            )
+
+            def newest_memtable_value(key):
+                """Return key's newest memtable value, preferring the active memtable."""
+                if key in self._store:
+                    return self._store[key][-1][1]
+                if self._imm_memtable:
+                    return self._imm_memtable[key][-1][1]
+
+            live_keys = set(self._store)
+            if self._imm_memtable:
+                live_keys |= set(self._imm_memtable)
+            keys_num = sum(1 for key in live_keys if newest_memtable_value(key) is not _TOMBSTONE)
             write_amplification = self._bytes_written_disk / self._bytes_written_user if self._bytes_written_user != 0 else 0
 
             return {

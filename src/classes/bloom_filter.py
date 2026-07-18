@@ -2,6 +2,7 @@
 
 import math
 import hashlib
+import os
 from bitarray import bitarray
 
 class BloomFilter:
@@ -70,3 +71,22 @@ class BloomFilter:
     def serialize(self):
         """Encode the hash count and bit array for durable storage."""
         return f"{self._num_hashes}\n" + self._bits.to01()
+
+
+def write_bloom_filter(store_path, index, items, false_positive_rate):
+    """Build a filter sized for ``items``, persist it, and return it."""
+    filter = BloomFilter.for_capacity(len(items), false_positive_rate)
+    for key, _ in items:
+        filter.add(key)
+
+    with open(store_path(f"sst_{index}.bloom"), 'w', encoding='utf-8') as file:
+        file.write(filter.serialize())
+        file.flush()
+        os.fsync(file.fileno())
+
+    return filter
+
+def load_bloom_filter(store_path, index):
+    """Read and deserialize a bloom filter sidecar file."""
+    with open(store_path(f"sst_{index}.bloom"), 'r', encoding='utf-8') as file:
+        return BloomFilter.deserialize(file.read())

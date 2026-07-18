@@ -21,7 +21,9 @@ def get(key: str, consistent: bool = False):
             max_tries=3,
         )
 
-    value = ctx.store.get(key)
+    value = None 
+    if ctx.store:
+        value = ctx.store.get(key)
     return {"key": key, "value": value}
 
 @router.get("/sync")

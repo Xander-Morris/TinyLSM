@@ -155,12 +155,13 @@ if __name__ == "__main__":
                     ctx.state.log.append(entry)
                     ctx.state.log_index = entry["index"]
 
-            if "snapshot" in response:
+            if response and "snapshot" in response:
                 for key, value in response["snapshot"]["data"].items():
                     ctx.store.set(key, value)
                 ctx.state.log_index = response["snapshot"]["index"]
 
-            _replay(response["entries"])
+            if response:
+                _replay(response["entries"])
         except Exception:
             pass
 

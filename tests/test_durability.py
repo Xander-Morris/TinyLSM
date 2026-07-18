@@ -3,6 +3,7 @@ import glob
 import json
 import os 
 import src.classes.kv_store as kv_store
+from src import config
 from conftest import force_flush
 
 def test_checksum_corruption(store):
@@ -90,3 +91,18 @@ def test_checksum_valid_after_restart(store):
     store.close() 
     store = kv_store.KVStore() 
     assert store.get("xander") == "test"
+
+def test_wal_line_corruption(store):
+    store.set("alpha", "1")
+    store.set("beta", "2")
+    store.close()
+
+    with open(config.LOG_FILE_NAME, "r+") as file:
+        lines = file.readlines()
+        lines[1] = "This is the newly overwritten line!\n"
+        file.seek(0)
+        file.writelines(lines)
+
+    store = kv_store.KVStore()
+    assert store.get("alpha") == "1"
+    assert store.get("beta") is None

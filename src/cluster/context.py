@@ -49,7 +49,8 @@ def _load_snapshot_from_disk():
         with open(SNAPSHOT_FILE, 'r') as f:
             saved = json.loads(f.read())
             for key, value in saved["data"].items():
-                store.set(key, value)
+                if store:
+                    store.set(key, value)
             state.log_index = saved["index"]
             state.snapshot_index = state.log_index
     except FileNotFoundError:
@@ -93,9 +94,11 @@ def _load_log_from_disk():
 def _handle_operation(operation, key, value):
     """Apply one replicated storage or membership operation locally."""
     if operation == "set":
-        store.set(key, value)
+        if store:
+            store.set(key, value)
     elif operation == "delete":
-        store.delete(key)
+        if store:
+            store.delete(key)
     elif operation == "add_node":
         with state:
             state.nodes.append(key)
@@ -132,7 +135,7 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
     if operation not in ("set", "delete", "add_node", "remove_node"):
         return {"ok": False}
 
-    json_tbl = {"key": key}
+    json_tbl: dict[str, str | None] = {"key": key}
     if operation == "set":
         json_tbl["value"] = value
 
@@ -144,7 +147,8 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
             lambda: requests.post(f"{leader}/{operation}", json=json_tbl, timeout=5),
             max_tries=3,
         )
-        return response.json()
+        if response:
+            return response.json()
 
     with state:
         state.log_index += 1

@@ -1,1 +1,1 @@
-"""TinyLSM's educational HTTP replication layer."""
+"""TinyLSM's HTTP replication layer."""

@@ -15,7 +15,7 @@ class ReplicateRequest(BaseModel):
     """Payload sent by a leader when it replicates one log entry."""
     operation: str
     key: str
-    value: str = None
+    value: str | None = None
     index: int
 
 class VoteRequest(BaseModel):
