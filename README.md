@@ -180,11 +180,20 @@ Each SSTable record stores `key seq value checksum`. The checksum is verified on
 Each write gets a monotonically increasing sequence number. The Python API supports snapshot reads:
 
 ```python
-store.get("foo", at=seq)
-store.scan("a", "z", at=seq)
+with store.snapshot() as snapshot:
+    store.get("foo", at=snapshot)
+    store.scan("a", "z", at=snapshot)
 ```
 
-That lets you read the latest value at or before a specific sequence number.
+The context pins its sequence while it is open, so compaction keeps the
+versions and tombstones needed by those reads. TinyLSM retains the newest value
+at or before the oldest active snapshot plus every later value. After the
+context closes, a later compaction may reclaim older history.
+
+You can still pass a sequence number directly to `get`, `scan`, or `iter`, but
+an unpinned old sequence is only readable while its history has not yet been
+compacted away. Use `snapshot()` whenever a read must remain stable while
+writes and compactions continue.
 
 ### Startup and Recovery
 

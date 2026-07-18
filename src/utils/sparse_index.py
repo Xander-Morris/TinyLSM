@@ -1,7 +1,10 @@
+"""Parsing and searching helpers for sparse SSTable index sidecars."""
+
 import binascii
 import json
 
 def parse_sparse_index_line(line):
+    """Validate and decode one checksummed sparse-index record."""
     line = line.rstrip("\r\n")
     if "\t" not in line:
         raise ValueError(f"Malformed sparse index line: {line!r}")
@@ -16,6 +19,7 @@ def parse_sparse_index_line(line):
     return record["k"], int(record["o"])
 
 def search_sparse_index_for_key_offset(sparse_index, key):
+    """Return the nearest indexed byte offset at or before ``key``."""
     low = 0
     high = len(sparse_index) - 1
     found = False

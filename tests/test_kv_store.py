@@ -1,6 +1,14 @@
 import pytest 
 from conftest import force_flush, force_compaction, do_setting, assert_all_readable
+import src.config as config
 import src.classes.kv_store as kv_store 
+
+
+def _flush_active_memtable(store, name):
+    """Force one small, deterministic flush for compaction tests."""
+    store.set(f"__flush_{name}", "x" * config.MAX_MEMTABLE_SIZE)
+    assert store._flush_thread is not None
+    store._flush_thread.join()
 
 def test_set_get(store):
     store.set("foo", "bar")
@@ -164,3 +172,63 @@ def test_iter_snapshot_after_flush(store):
     store.set("foo", "baz")
     assert list(store.iter("foo", "foo", at=seq1)) == [("foo", "bar")]
     assert list(store.iter("foo", "foo")) == [("foo", "baz")]
+
+
+def test_pinned_snapshot_survives_compaction_and_is_reclaimed_after_close(store, monkeypatch):
+    """Compaction keeps history only while a snapshot has pinned its sequence."""
+    monkeypatch.setattr(config, "MAX_MEMTABLE_SIZE", 64)
+    monkeypatch.setattr(config, "MAX_L0_FILES", 2)
+
+    store.set("history", "v1")
+    with store.snapshot() as snapshot:
+        store.set("history", "v2")
+        _flush_active_memtable(store, "first")
+        store.set("history", "v3")
+        _flush_active_memtable(store, "second")
+
+        assert store.get("history") == "v3"
+        assert store.get("history", at=snapshot) == "v1"
+        assert store.scan("history", "history", at=snapshot) == [("history", "v1")]
+
+    assert not store._active_snapshots
+
+    # Two more L0 files trigger another compaction.  With no snapshot pinned,
+    # only the newest version has to remain.
+    store.set("history", "v4")
+    _flush_active_memtable(store, "third")
+    store.set("history", "v5")
+    _flush_active_memtable(store, "fourth")
+
+    assert store.get("history") == "v5"
+    assert store.get("history", at=snapshot) is None
+
+
+def test_pinned_snapshot_preserves_value_before_a_compacted_delete(store, monkeypatch):
+    """A tombstone remains while a snapshot can still see the prior value."""
+    monkeypatch.setattr(config, "MAX_MEMTABLE_SIZE", 64)
+    monkeypatch.setattr(config, "MAX_L0_FILES", 2)
+
+    store.set("deleted", "before")
+    with store.snapshot() as snapshot:
+        store.delete("deleted")
+        _flush_active_memtable(store, "delete")
+        _flush_active_memtable(store, "compact")
+
+        assert store.get("deleted") is None
+        assert store.get("deleted", at=snapshot) == "before"
+
+
+def test_snapshots_at_the_same_sequence_are_reference_counted(store):
+    """Closing one of two equal snapshots must not unpin the other one."""
+    store.set("key", "value")
+
+    with store.snapshot() as first:
+        with store.snapshot() as second:
+            assert first == second
+            assert store._active_snapshots[first] == 2
+            assert store._oldest_active_snapshot_seq() == first
+
+        assert store._active_snapshots[first] == 1
+        assert store._oldest_active_snapshot_seq() == first
+
+    assert not store._active_snapshots

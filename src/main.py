@@ -1,7 +1,10 @@
+"""Interactive command-line entry point for a local TinyLSM store."""
+
 from src.utils.process_line import process_line
 from src.classes import kv_store
 
 def main():
+    """Run the REPL until the user exits or interrupts it."""
     store = kv_store.KVStore()
 
     try:

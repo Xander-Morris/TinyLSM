@@ -1,7 +1,10 @@
+"""Checksum-aware parsing for TinyLSM write-ahead-log records."""
+
 import binascii
 import json
 
 def parse_wal_record(line):
+    """Return a decoded WAL record, or ``None`` when the line is invalid."""
     line = line.rstrip("\r\n")
     if "\t" not in line:
         return None

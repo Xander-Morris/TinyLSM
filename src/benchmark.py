@@ -1,3 +1,5 @@
+"""A small, repeatable benchmark for TinyLSM's local storage engine."""
+
 import src.classes.kv_store as kv_store
 import os
 import time
@@ -13,6 +15,7 @@ BENCHMARK_DEFAULTS = {
 }
 
 def configure_benchmark_defaults():
+    """Use benchmark-friendly settings unless the caller opts out explicitly."""
     if os.getenv("BENCHMARK_USE_STORE_CONFIG"):
         return
 
@@ -21,6 +24,7 @@ def configure_benchmark_defaults():
     config.WAL_BUFFER_SIZE = int(os.getenv("BENCHMARK_WAL_BUFFER_SIZE", BENCHMARK_DEFAULTS["WAL_BUFFER_SIZE"]))
 
 def do_benchmark_funct(store, n, funct_type):
+    """Run one named workload ``n`` times and return its elapsed seconds."""
     start = time.perf_counter()
     ops = {
         "writes": lambda i: store.set(f"test_key_{i}", f"test_value_{i}"),
@@ -37,15 +41,19 @@ def do_benchmark_funct(store, n, funct_type):
     return end - start 
 
 def benchmark_reads(store, n):
+    """Measure sequential point reads for keys written by the benchmark."""
     return do_benchmark_funct(store, n, "reads")
 
 def benchmark_misses(store, n):
+    """Measure point reads for keys that are absent from the store."""
     return do_benchmark_funct(store, n, "misses")
 
 def benchmark_writes(store, n):
+    """Measure sequential writes of unique benchmark keys."""
     return do_benchmark_funct(store, n, "writes")
 
 def benchmark_concurrent_reads(store, n, num_threads):
+    """Measure point reads split evenly across ``num_threads`` workers."""
     per_thread = n // num_threads
     threads = []
 
@@ -66,6 +74,7 @@ def benchmark_concurrent_reads(store, n, num_threads):
     return time.perf_counter() - start
 
 def setup():
+    """Create an isolated temporary store for one benchmark run."""
     pth = tempfile.mkdtemp()
     os.chdir(pth) 
     store = kv_store.KVStore()
@@ -73,6 +82,7 @@ def setup():
     return store, pth 
 
 def main():
+    """Run and print write, read, concurrent-read, and miss benchmarks."""
     original_dir = os.getcwd()
     configure_benchmark_defaults()
     store, pth = setup()

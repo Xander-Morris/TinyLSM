@@ -1,3 +1,5 @@
+"""SSTable record parsing and fallback searching utilities."""
+
 import binascii
 import json
 
@@ -7,9 +9,11 @@ from src.utils.versioning import pick_version
 _TOMBSTONE = TombstoneType()
 
 def sst_index(entry):
+    """Extract TinyLSM's numeric SSTable generation from a manifest entry."""
     return int(entry["file_name"].split("_")[1])
 
 def parse_sstable_line(line):
+    """Validate and decode one checksummed SSTable record."""
     line = line.rstrip("\r\n")
     if "\t" not in line:
         raise ValueError(f"Malformed SSTable line: {line!r}")
@@ -26,6 +30,7 @@ def parse_sstable_line(line):
     return record["k"], int(record["s"]), value
 
 def binary_search(tuples, key, at=None):
+    """Find the version of ``key`` visible at ``at`` in parsed SSTable tuples."""
     low = 0
     high = len(tuples) - 1
 

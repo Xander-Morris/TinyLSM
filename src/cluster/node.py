@@ -1,3 +1,5 @@
+"""FastAPI application startup and background loops for one TinyLSM node."""
+
 import random
 import sys
 import os
@@ -15,6 +17,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Initialize the heartbeat timestamp for FastAPI's application lifespan."""
     with ctx.state:
         ctx.state.last_heartbeat = time.time()
     yield
@@ -23,7 +26,9 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(router)
 
 def _send_heartbeats():
+    """Continuously send the leader's log tail to every reachable follower."""
     def _heartbeat_one(node_url):
+        """Send the follower only the log suffix it has not acknowledged."""
         try:
             with ctx.state:
                 follower_index = ctx.state.follower_indices.get(node_url, 0)
@@ -61,7 +66,9 @@ def _send_heartbeats():
 
 
 def _start_election():
+    """Run a pre-vote and, if viable, an election for local leadership."""
     def _send_vote_requests_to_all_other_nodes(vote_term, prevote=False):
+        """Collect enough pre-votes or votes to form the current majority."""
         votes = 1
         votes_lock = threading.Lock()
 
@@ -70,6 +77,7 @@ def _start_election():
             majority = (len(ctx.state.nodes) // 2) + 1
 
         def _request_vote(node_url):
+            """Ask one peer to support this candidate for ``vote_term``."""
             nonlocal votes
             try:
                 endpoint = "/prevote" if prevote else "/vote"
@@ -140,6 +148,7 @@ if __name__ == "__main__":
             )
 
             def _replay(entries_list):
+                """Apply synchronized entries in log order during node startup."""
                 for entry in entries_list:
                     ctx._handle_operation(entry["operation"], entry["key"], entry["value"])
                     ctx.state.log.append(entry)
@@ -158,6 +167,7 @@ if __name__ == "__main__":
     ctx.state.last_heartbeat = time.time()
 
     def _election_timeout_watcher():
+        """Start an election when this follower has missed its leader's heartbeat."""
         while True:
             with ctx.state:
                 leader = ctx.state.leader

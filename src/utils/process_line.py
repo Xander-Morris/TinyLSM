@@ -1,6 +1,13 @@
+"""Command parsing for TinyLSM's intentionally small interactive REPL."""
+
 import shlex
 
 def process_line(store, line):
+    """Execute one REPL command and return output that the caller should print.
+
+    Quoted tokens are handled by :mod:`shlex`; commands that perform their own
+    output, such as ``SCAN``, return ``None``.
+    """
     line = line.strip()
     if not line:
         return

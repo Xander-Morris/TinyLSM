@@ -1,9 +1,12 @@
+"""Helpers for sizing and splitting compaction output SSTables."""
+
 from src.classes.tombstone import TombstoneType
 
 _TOMBSTONE = TombstoneType()
 _TOMBSTONE_BYTES = 1  # Accounting weight for tombstone marker in memtable
 
 def versions_size(key, versions):
+    """Estimate the in-memory payload size of every version for one key."""
     total = 0
     for _, value in versions:
         val_size = _TOMBSTONE_BYTES if value is _TOMBSTONE else len(value)
@@ -11,6 +14,11 @@ def versions_size(key, versions):
     return total
 
 def chunk_by_target_size(sorted_items, target_size):
+    """Split sorted key/version groups into SSTable-sized chunks.
+
+    A key's complete version history stays in a single chunk so an SSTable
+    never contains only part of that key's visible history.
+    """
     chunks = []
     chunk = []
     chunk_size = 0

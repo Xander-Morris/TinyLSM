@@ -1,15 +1,25 @@
+"""The durable, local LSM-tree key-value store used by TinyLSM.
+
+``KVStore`` keeps recent writes in memory, records them in a write-ahead log,
+and flushes immutable memtables to sorted-string tables (SSTables).  It also
+owns recovery, compaction, and the snapshot-pinning rules that preserve
+historical versions while a caller is reading them.
+"""
+
+import binascii
 import glob
-import os
+import heapq
 import json
-from src.classes.tombstone import TombstoneType
-import src.config as config
+import os
+import threading
+from collections import Counter
+from contextlib import contextmanager
+
 import src.classes.bloom_filter as bloom_filter
 import src.classes.manifest as manifest
 import src.classes.read_write_lock as read_write_lock
-import binascii
-import threading
-import heapq
-
+import src.config as config
+from src.classes.tombstone import TombstoneType
 from src.utils.file_lock import try_lock_fd, unlock_fd
 from src.utils.sstable import sst_index, parse_sstable_line, binary_search
 from src.utils.sparse_index import (
@@ -25,7 +35,18 @@ _TOMBSTONE = TombstoneType()
 _TOMBSTONE_BYTES = 1  # Accounting weight for tombstone marker in memtable
 
 class KVStore:
+    """A small, thread-safe key-value store backed by an LSM tree.
+
+    Args:
+        data_dir: Directory that owns the WAL, manifest, SSTables, and lock
+            file.  The current working directory is used when omitted.
+
+    A store permits multiple concurrent readers but only one writer at a time.
+    It also permits one process per data directory, enforced by ``LOCK``.
+    """
+
     def __init__(self, data_dir=None):
+        """Open ``data_dir``, recover published data, and acquire its lock."""
         self._data_dir = os.path.abspath(data_dir) if data_dir else os.path.abspath(os.getcwd())
         os.makedirs(self._data_dir, exist_ok=True)
 
@@ -46,6 +67,7 @@ class KVStore:
             raise RuntimeError(f"Another process holds the lock on {self._data_dir}")
 
         self._store = {}
+        self._active_snapshots = Counter()
         self._imm_memtable = None
         self._imm_entries = 0
         self._entries = 0
@@ -87,19 +109,81 @@ class KVStore:
             self._release_directory_lock()
             raise
 
+    @contextmanager
+    def snapshot(self):
+        """Pin and yield the sequence number for a consistent read snapshot.
+
+        Pass the yielded sequence to :meth:`get`, :meth:`scan`, or
+        :meth:`iter`.  While this context is open, compaction preserves the
+        versions needed to answer reads at that sequence.  Once the context
+        closes, a later compaction may reclaim that older history.
+
+        Yields:
+            int: The newest committed sequence number visible to the snapshot.
+        """
+        with self._lock.write():
+            seq = self._seq
+            self._active_snapshots[seq] += 1
+
+        try:
+            yield seq
+        finally:
+            # This snapshot is no longer using that sequence.
+            with self._lock.write():
+                self._active_snapshots[seq] -= 1
+                if self._active_snapshots[seq] == 0:
+                    del self._active_snapshots[seq]
+
+    def _oldest_active_snapshot_seq(self):
+        """Return the oldest pinned sequence, or ``None`` when none exist.
+
+        Keeping data for the oldest active snapshot automatically keeps enough
+        history for every newer active snapshot as well.
+        """
+        if not self._active_snapshots:
+            return None
+        return min(self._active_snapshots)
+
+    def _versions_to_keep(self, versions, oldest_snapshot):
+        """Select the minimal versions that remain readable after compaction.
+
+        A snapshot at sequence ``S`` needs the latest version at or before
+        ``S`` plus every later version.  Versions older than that baseline can
+        no longer be observed by any active snapshot and may be discarded.
+        """
+        versions = sorted(versions, key=lambda item: item[0])
+
+        if oldest_snapshot is None:
+            return [versions[-1]]
+
+        baseline = None
+        newer_versions = []
+
+        for seq, value in versions:
+            if seq <= oldest_snapshot:
+                baseline = (seq, value)
+            else:
+                newer_versions.append((seq, value))
+
+        return ([baseline] if baseline is not None else []) + newer_versions
+
     def _path(self, name):
+        """Return the absolute path for a file managed by this store."""
         return os.path.join(self._data_dir, name)
 
     def _release_directory_lock(self):
+        """Release the process-level lock if this instance still owns it."""
         if self._lock_fh is not None:
             unlock_fd(self._lock_fh.fileno())
             self._lock_fh.close()
             self._lock_fh = None
 
     def _meta_path(self):
+        """Return the path used for persistent counters and sequence state."""
         return self._path("meta")
 
     def _load_meta(self):
+        """Load nonessential persisted counters when a valid meta file exists."""
         try:
             with open(self._meta_path(), 'r', encoding='utf-8') as file:
                 meta = json.load(file)
@@ -117,6 +201,7 @@ class KVStore:
             self._bytes_written_user = 0
 
     def _save_meta(self):
+        """Atomically persist sequence and write-accounting counters."""
         meta = {
             "seq": self._seq,
             "bytes_written_disk": self._bytes_written_disk,
@@ -130,8 +215,11 @@ class KVStore:
         os.replace(tmp, self._meta_path())
 
     def _cleanup_orphan_sst_files(self):
-        """Delete SST data/bloom/index files not referenced by the manifest.
-        Crash-mid-compaction can leave either side orphaned; the manifest is truth."""
+        """Delete SSTable sidecars not referenced by the current manifest.
+
+        A crash before a manifest update can leave fully written but unpublished
+        files behind.  The manifest is the source of truth for published data.
+        """
         expected = {sst_index(entry) for entry in self._manifest.entries}
         on_disk = set()
         for path in glob.glob(self._path("sst_*")):
@@ -149,8 +237,8 @@ class KVStore:
                 except FileNotFoundError:
                     pass
 
-    # Instance file-I/O helpers
     def _write_to_sstable_file(self, index, sorted_store):
+        """Write one sorted SSTable and its sparse-index sidecar durably."""
         sparse = []
         min_key, max_key = None, None
 
@@ -194,6 +282,7 @@ class KVStore:
         return (sparse, min_key, max_key)
 
     def _build_sstable_tuples(self, index, index_file=False):
+        """Read one SSTable or sparse-index sidecar into parsed tuples."""
         tuples = []
         file_name = self._path(f"sst_{index}.index") if index_file else self._path(f"sst_{index}")
 
@@ -211,6 +300,7 @@ class KVStore:
         return tuples
 
     def _sstable_iter_from(self, index, sparse_index, start_key):
+        """Yield records from an SSTable, seeking near ``start_key`` first."""
         offset = search_sparse_index_for_key_offset(sparse_index, start_key)
 
         with open(self._path(f"sst_{index}"), 'r', encoding='utf-8') as file:
@@ -224,6 +314,7 @@ class KVStore:
                 yield (key, seq, value)
 
     def _search_sstable_with_index(self, index, sparse_index, key, at=None):
+        """Find the version of ``key`` visible at ``at`` in one SSTable."""
         offset = search_sparse_index_for_key_offset(sparse_index, key)
         versions = []
 
@@ -240,8 +331,8 @@ class KVStore:
 
         return pick_version(versions, at) if versions else None
 
-    # Private Methods
     def _wal_write_record(self, op, seq, key, value=None):
+        """Append one checksummed mutation record to the open WAL."""
         record = {"op": op, "seq": seq, "key": key}
         if value is not None:
             record["value"] = value
@@ -251,6 +342,7 @@ class KVStore:
         self._increment_wal_buffer_count()
 
     def _increment_wal_buffer_count(self):
+        """Synchronize the WAL whenever the configured group size is reached."""
         self._wal_buffer_count += 1
 
         if self._wal_buffer_count >= config.WAL_BUFFER_SIZE:
@@ -259,6 +351,7 @@ class KVStore:
             self._wal_buffer_count = 0
 
     def _replay_line(self, line):
+        """Replay one valid WAL line, returning ``False`` for a damaged record."""
         record = parse_wal_record(line)
         if record is None:
             return False
@@ -273,6 +366,7 @@ class KVStore:
         return True
 
     def _write_sstable(self, index, data):
+        """Write an SSTable, then publish its in-memory search sidecars."""
         write_result = self._write_to_sstable_file(index, data)
         self._sparse_indexes[index] = write_result[0]
         self._write_bloom_filter(data, index)
@@ -281,6 +375,7 @@ class KVStore:
         return write_result
 
     def _write_bloom_filter(self, items, index):
+        """Build and persist the bloom filter used to skip SSTable reads."""
         filter = bloom_filter.BloomFilter.for_capacity(len(items), config.BLOOM_FALSE_POSITIVE_RATE)
 
         for key, _ in items:
@@ -294,6 +389,11 @@ class KVStore:
         self._bloom_filters[index] = filter
 
     def _compact_level(self, level):
+        """Merge one level into the next while preserving pinned snapshots.
+
+        The caller holds the store write lock.  This makes the active snapshot
+        set stable while versions are selected and the manifest is replaced.
+        """
         entries = [entry for entry in self._manifest.entries if entry["level"] == level]
 
         if not entries:
@@ -305,6 +405,7 @@ class KVStore:
         merged = {}
 
         def read_from_entries_list(entries_list):
+            """Add every version from one compaction input set to ``merged``."""
             for entry in entries_list:
                 index = sst_index(entry)
 
@@ -316,22 +417,27 @@ class KVStore:
         read_from_entries_list(next_entries)
         read_from_entries_list(entries)
 
-        for key in merged:
-            merged[key].sort(key=lambda x: x[0])
-            merged[key] = [merged[key][-1]]
-
-        surviving = {}
+        oldest_snapshot = self._oldest_active_snapshot_seq()
+        compacted = {}
         for key, versions in merged.items():
-            if versions[0][1] is _TOMBSTONE:
+            kept_versions = self._versions_to_keep(versions, oldest_snapshot)
+
+            # Without a pinned snapshot, the newest tombstone may be dropped
+            # only if no lower level can still contain an older value.  With a
+            # pinned snapshot, tombstones are data too: an old read may need to
+            # observe either the tombstone or the value before it.
+            if oldest_snapshot is None and kept_versions[0][1] is _TOMBSTONE:
                 has_older = any(
-                    e["level"] > level + 1 and e["min_key"] <= key <= e["max_key"]
-                    for e in self._manifest.entries
+                    entry["level"] > level + 1
+                    and entry["min_key"] <= key <= entry["max_key"]
+                    for entry in self._manifest.entries
                 )
                 if not has_older:
                     continue
-            surviving[key] = versions
 
-        merged = sorted(surviving.items())
+            compacted[key] = kept_versions
+
+        merged = sorted(compacted.items())
 
         """
             Step 1: write all new SST files (data, bloom, index) durably to disk
@@ -365,6 +471,7 @@ class KVStore:
             self._sparse_indexes.pop(index, None)
 
     def _compact(self):
+        """Compact levels until the next level is below its file-count limit."""
         level = 0
 
         while True:
@@ -378,6 +485,7 @@ class KVStore:
             level += 1
 
     def _flush(self):
+        """Rotate the mutable memtable and flush it on a background thread."""
         if self._imm_memtable is not None:
             return
 
@@ -394,7 +502,10 @@ class KVStore:
         self._wal = open(self._path(config.LOG_FILE_NAME), 'a', encoding='utf-8')
 
         def _threaded_funct():
+            """Write the immutable memtable, then publish it under the write lock."""
             try:
+                if not self._imm_memtable:
+                    return
                 sorted_store = sorted(self._imm_memtable.items())
                 write_result = self._write_to_sstable_file(index, sorted_store)
 
@@ -434,6 +545,7 @@ class KVStore:
         self._flush_thread.start()
 
     def _load_sstables(self):
+        """Load SSTable sidecars and recover the highest allocated file index."""
         max_index = 0
         for entry in self._manifest.entries:
             index_counter = sst_index(entry)
@@ -454,6 +566,7 @@ class KVStore:
         self._index_counter = max_index
 
     def _set_key_seq_value(self, key: str, value, seq: int):
+        """Append one already-sequenced value to the active memtable."""
         if key not in self._store:
             self._store[key] = []
         self._store[key].append((seq, value))
@@ -461,6 +574,7 @@ class KVStore:
         self._entries += len(key) + val_size
 
     def _set(self, key: str, value: str, seq: int):
+        """Apply a set mutation after it has been assigned a sequence number."""
         self._set_key_seq_value(key, value, seq)
         self._bytes_written_user += len(key) + len(value)
 
@@ -468,6 +582,7 @@ class KVStore:
             self._flush()
 
     def _delete(self, key: str, seq: int):
+        """Apply a delete mutation by adding a tombstone to the memtable."""
         self._set_key_seq_value(key, _TOMBSTONE, seq)
         self._bytes_written_user += len(key)
 
@@ -475,17 +590,18 @@ class KVStore:
             self._flush()
 
     def _wait_for_flush_to_drain(self):
-        """
-            Blocks until the in-flight flush completes, which prevents the memtable
-            from growing unboundedly when writes outpace flush throughput.
-        """
+        """Wait for the in-flight flush before allowing more buffered writes."""
         with self._flush_drained:
             while self._imm_memtable is not None:
                 self._flush_drained.wait()
 
-    # Public Methods
-    # Read Operations
     def get(self, key: str, at=None):
+        """Return ``key``'s value, or ``None`` when it is missing or deleted.
+
+        Args:
+            key: Key to look up.
+            at: Optional snapshot sequence returned by :meth:`snapshot`.
+        """
         with self._lock.read():
             if key in self._store:
                 raw_value = get_raw_value_from_table_at(self._store, key, at)
@@ -525,17 +641,19 @@ class KVStore:
             return None
 
     def scan(self, start: str, end: str, at=None):
+        """Return visible ``(key, value)`` pairs in the inclusive key range."""
         return self._materialize_range(start, end, at)
 
     def iter(self, start: str, end: str, at=None):
-        """
-            Materialize results inside the read lock so callers can safely call
-            other store methods while iterating. The yielding-while-locked pattern
-            would deadlock on any nested write call from the same thread.
+        """Return an iterator over a materialized, consistent range result.
+
+        The range is materialized before this method returns, so callers may
+        safely write to the store while consuming the iterator.
         """
         return iter(self._materialize_range(start, end, at))
 
     def _materialize_range(self, start: str, end: str, at=None):
+        """Merge memtables and SSTables into one sorted, visible key range."""
         results = []
         with self._lock.read():
             sources = []
@@ -551,6 +669,7 @@ class KVStore:
             best_value = None
 
             def should_yield(val, seq):
+                """Return whether this version is visible in the requested range."""
                 return val is not _TOMBSTONE and (at is None or seq <= at)
 
             for key, seq, value in heapq.merge(*sources):
@@ -574,6 +693,7 @@ class KVStore:
         return results
 
     def stats(self):
+        """Return storage layout and write-accounting statistics."""
         with self._lock.read():
             mp = {}
 
@@ -606,10 +726,11 @@ class KVStore:
             }
 
     def dump(self):
+        """Return the current visible database contents as a dictionary."""
         return dict(self.scan("", "\U0010FFFF"))
 
-    # Write Operations
     def set(self, key: str, value: str):
+        """Durably queue ``value`` as the newest value for ``key``."""
         while True:
             with self._lock.write():
                 if self._imm_memtable is not None and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
@@ -623,6 +744,7 @@ class KVStore:
             self._wait_for_flush_to_drain()
 
     def delete(self, key: str):
+        """Durably mark ``key`` deleted with a tombstone."""
         while True:
             with self._lock.write():
                 if self._imm_memtable is not None and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
@@ -635,8 +757,8 @@ class KVStore:
                     return
             self._wait_for_flush_to_drain()
 
-    # Close
     def close(self):
+        """Finish any flush, synchronize the WAL, and release the directory."""
         if self._wal.closed:
             return
 

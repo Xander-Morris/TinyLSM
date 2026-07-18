@@ -1,18 +1,15 @@
+"""A compact bloom filter used to avoid unnecessary SSTable reads."""
+
 import math
 import hashlib
 from bitarray import bitarray
 
 class BloomFilter:
+    """Probabilistic set membership with no false negatives when uncorrupted."""
+
     @staticmethod
     def for_capacity(n: int, false_positive_rate: float):
-        """
-            I use this to determine the optimal bit-array size (m) and number of hash functions (k) to use to store
-            a specific number of items (n) while maintaining a target false positive rate.  
-            
-            Args:
-                n: number of items to store 
-                false_positive_rate: target false positive rate for entire bloom filter
-        """
+        """Create a filter sized for ``n`` items and a target false-positive rate."""
         if n <= 0:
             return BloomFilter(1, 1)
         m = max(1, math.ceil(-n * math.log(false_positive_rate) / (math.log(2) ** 2)))
@@ -21,6 +18,7 @@ class BloomFilter:
 
     @staticmethod
     def deserialize(data):
+        """Restore a filter from TinyLSM's human-readable on-disk format."""
         data = data.strip()
         if "\n" not in data:
             raise ValueError("Malformed bloom filter data: missing newline separator")
@@ -37,8 +35,8 @@ class BloomFilter:
         f._bits = bitarray(bits_str)
         return f
 
-    # Private Helpers
     def _hash_index(self, key, i):
+        """Map one key/hash-round pair to a bit-array position."""
         if isinstance(key, str):
             key = key.encode("utf-8")
         h = hashlib.sha256(key + i.to_bytes(4, "big")).digest()
@@ -46,6 +44,7 @@ class BloomFilter:
         return int.from_bytes(h, "big") % len(self._bits)
 
     def __init__(self, size, num_hashes):
+        """Create an empty filter with the supplied bit and hash-function counts."""
         size = max(1, size)
         num_hashes = max(1, num_hashes)
         self._bits = bitarray(size)
@@ -53,11 +52,13 @@ class BloomFilter:
         self._num_hashes = num_hashes
 
     def add(self, key):
+        """Record ``key`` as present in the filter."""
         for i in range(self._num_hashes):
             idx = self._hash_index(key, i)
             self._bits[idx] = 1
 
     def contains(self, key):
+        """Return whether ``key`` may be present in the filter."""
         for i in range(self._num_hashes):
             idx = self._hash_index(key, i)
 
@@ -67,4 +68,5 @@ class BloomFilter:
         return True
 
     def serialize(self):
+        """Encode the hash count and bit array for durable storage."""
         return f"{self._num_hashes}\n" + self._bits.to01()

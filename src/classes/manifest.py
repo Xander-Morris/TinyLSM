@@ -1,15 +1,21 @@
+"""The checksummed manifest that publishes TinyLSM SSTables atomically."""
+
 import binascii
 import json
 import os
 
 
 def _canonical_entries(entries):
+    """Encode manifest entries deterministically before calculating their CRC."""
     return json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 class Manifest:
+    """In-memory view of the SSTables currently published by a store."""
+
     @staticmethod
     def load(data_dir):
+        """Load and validate the manifest in ``data_dir`` when it exists."""
         path = os.path.join(data_dir, "manifest.json")
         try:
             with open(path, 'r', encoding='utf-8') as file:
@@ -31,16 +37,20 @@ class Manifest:
         return m
 
     def __init__(self, data_dir):
+        """Create an empty manifest rooted at ``data_dir``."""
         self._data_dir = data_dir
         self.entries = []
 
     def add(self, level, file_name, min_key, max_key):
+        """Publish metadata for an SSTable that has already been written."""
         self.entries.append({"level": level, "file_name": file_name, "min_key": min_key, "max_key": max_key})
 
     def remove(self, file_name):
+        """Remove an SSTable entry before deleting its associated files."""
         self.entries = [entry for entry in self.entries if entry["file_name"] != file_name]
 
     def save(self):
+        """Atomically replace the on-disk manifest with the current entries."""
         tmp_path = os.path.join(self._data_dir, "manifest.tmp")
         target_path = os.path.join(self._data_dir, "manifest.json")
         crc = binascii.crc32(_canonical_entries(self.entries))
@@ -53,4 +63,5 @@ class Manifest:
         os.replace(tmp_path, target_path)
 
     def clear(self):
+        """Discard all in-memory entries without modifying files on disk."""
         self.entries = []

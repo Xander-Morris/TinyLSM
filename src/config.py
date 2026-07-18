@@ -1,10 +1,18 @@
+"""Environment-backed configuration shared by the storage and cluster layers.
+
+The checked-in ``.env.example`` documents every setting.  Importers read these
+module-level values, which makes simple experiments easy and tests can override
+individual settings temporarily with ``monkeypatch``.
+"""
+
 import os
-import dotenv 
+
+import dotenv
 
 dotenv.load_dotenv()
 
 LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "log_file.txt")
-MAX_MEMTABLE_SIZE = int(os.getenv("MAX_MEMTABLE_SIZE", 4096)) # Default of 4KB
+MAX_MEMTABLE_SIZE = int(os.getenv("MAX_MEMTABLE_SIZE", 4096))  # Default of 4 KiB.
 TOMBSTONE_VALUE = os.getenv("TOMBSTONE_VALUE", "__TOMBSTONE__")
 BLOOM_FALSE_POSITIVE_RATE = float(os.getenv("BLOOM_FALSE_POSITIVE_RATE", 0.01))
 SPARSE_INDEX_N = int(os.getenv("SPARSE_INDEX_N", 4))
