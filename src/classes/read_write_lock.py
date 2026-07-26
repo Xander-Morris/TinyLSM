@@ -10,6 +10,7 @@ class ReadWriteLock:
     flush, compaction, or mutation indefinitely.
     """
 
+    # Private Methods 
     def __init__(self):
         """Create an unlocked reader/writer lock."""
         self._readers = 0
@@ -51,6 +52,7 @@ class ReadWriteLock:
             else:
                 self._readers_ok.notify_all()
 
+    # Public Methods 
     @contextmanager
     def read(self):
         """Yield while holding a shared read lock."""

@@ -4,11 +4,9 @@ import binascii
 import json
 import os
 
-
 def _canonical_entries(entries):
     """Encode manifest entries deterministically before calculating their CRC."""
     return json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
 
 class Manifest:
     """In-memory view of the SSTables currently published by a store."""
