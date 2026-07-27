@@ -1,7 +1,8 @@
-import pytest 
-import glob 
+import pytest
+import glob
 import json
-import os 
+import os
+import struct
 import src.classes.kv_store as kv_store
 from src import config
 from conftest import force_flush
@@ -93,15 +94,21 @@ def test_checksum_valid_after_restart(store):
     assert store.get("xander") == "test"
 
 def test_wal_line_corruption(store):
+    """A corrupted record and everything after it must not replay."""
     store.set("alpha", "1")
     store.set("beta", "2")
     store.close()
 
-    with open(config.LOG_FILE_NAME, "r+") as file:
-        lines = file.readlines()
-        lines[1] = "This is the newly overwritten line!\n"
-        file.seek(0)
-        file.writelines(lines)
+    with open(config.LOG_FILE_NAME, "rb") as file:
+        data = bytearray(file.read())
+
+    (first_frame_payload_len,) = struct.unpack("<I", data[0:4])
+    first_frame_len = 4 + first_frame_payload_len + 4
+    corrupt_at = first_frame_len + 4  # inside the second record's payload
+    data[corrupt_at] ^= 0xFF
+
+    with open(config.LOG_FILE_NAME, "wb") as file:
+        file.write(data)
 
     store = kv_store.KVStore()
     assert store.get("alpha") == "1"

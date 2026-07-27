@@ -74,9 +74,14 @@ class BloomFilter:
 
 
 def write_bloom_filter(store_path, index, items, false_positive_rate):
-    """Build a filter sized for ``items``, persist it, and return it."""
+    """Build a filter sized for ``items``, persist it, and return it.
+
+    ``items`` may be a dict of key -> versions (the flush path) or an
+    iterable of ``(key, versions)`` pairs (the compaction path).
+    """
     filter = BloomFilter.for_capacity(len(items), false_positive_rate)
-    for key, _ in items.items():
+    pairs = items.items() if hasattr(items, "items") else items
+    for key, _ in pairs:
         filter.add(key)
 
     with open(store_path(f"sst_{index}.bloom"), 'w', encoding='utf-8') as file:

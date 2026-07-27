@@ -53,14 +53,20 @@ def binary_search(tuples, key, at=None):
     return None
 
 def write_to_sstable_file(store_path, index, sorted_store):
-    """Write one sorted SSTable and its sparse-index sidecar durably."""
+    """Write one sorted SSTable and its sparse-index sidecar durably.
+
+    ``sorted_store`` may be a dict of key -> versions (the flush path) or
+    an iterable of ``(key, versions)`` pairs already in sorted order (the
+    compaction path).
+    """
     sparse = []
     min_key, max_key = None, None
+    items = sorted_store.items() if hasattr(sorted_store, "items") else sorted_store
 
     with open(store_path(f"sst_{index}"), 'w', encoding='utf-8') as file:
         key_count = 0
 
-        for key, versions in sorted_store.items():
+        for key, versions in items:
             key_count += 1
             first_version = True
 

@@ -33,13 +33,12 @@ class SkipList:
         """
             Returns dictionary with key -> versions mappings.
         """
-        current = self._head 
         entries = {}
+        current = self._head.forward[0]
 
-        for i in range(self._level, -1, -1):
-            while current.forward[i]:
-                current = current.forward[i]
-                entries[current.key] = current.versions 
+        while current:
+            entries[current.key] = current.versions
+            current = current.forward[0]
 
         return entries
 
@@ -60,14 +59,12 @@ class SkipList:
             current = current.forward[0]
 
     def get_all_entries_iter(self):
-        current = self._head 
+        current = self._head.forward[0]
 
-        for i in range(self._level, -1, -1):
-            while current.forward[i]:
-                current = current.forward[i]
-
-                for seq, value in current.versions: 
-                    yield (current.key, seq, value)
+        while current:
+            for seq, value in current.versions:
+                yield (current.key, seq, value)
+            current = current.forward[0]
 
     def insert(self, key, seq, val):
         self._all_keys.add(key)
@@ -105,7 +102,7 @@ class SkipList:
 
         current = current.forward[0]
 
-        if not current: 
-            return 
+        if not current or current.key != key:
+            return
 
         return pick_version(current.versions, at)
