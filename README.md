@@ -6,8 +6,8 @@ It is not meant to be a production database. It is meant to be readable, hackabl
 
 ## What is implemented
 
-- Write-ahead logging
-- Mutable and immutable memtables
+- Write-ahead logging, using a length-framed binary record format with a CRC32 per record
+- Mutable and immutable memtables backed by a skip list, so entries are already key-sorted going into a flush or scan instead of needing a sort step
 - Background flush to SSTables
 - Bloom filter sidecars
 - Sparse index sidecars
@@ -52,14 +52,14 @@ Once `python -m src.main` is running, these commands are available:
 
 ```text
 SET key value
-GET key
+GET key at
 DELETE key
 SCAN start_key end_key
 STATS
 EXIT
 ```
 
-Keys and values are currently space-delimited, so the REPL works best with single-token keys and values.
+Keys and values are currently space-delimited, so the REPL works best with single-token keys and values. `GET` currently requires the `at` sequence number as a second argument; there is no shortcut yet for "just give me the latest value" from the REPL (the Python API's `get(key)` does support that). The REPL also lowercases the whole input line, so keys and values typed there come out lowercased.
 
 ## Docker
 
@@ -197,9 +197,9 @@ writes and compactions continue.
 
 ### Startup and Recovery
 
-On startup, the standalone store loads the manifest, then loads bloom filters and sparse indexes for each SSTable (SSTable data itself stays on disk). It restores the sequence counter from the `seq` file if present. It then replays `log_file.txt.flushing` if it exists (data from a flush that was in progress when the process last stopped), followed by the regular WAL. The manifest is stored in `manifest.json` and written atomically through a temporary file plus `os.replace`.
+On startup, the standalone store loads the manifest, then loads bloom filters and sparse indexes for each SSTable (SSTable data itself stays on disk). It restores its counters, including the sequence number, from the `meta` file if present. Any leftover `wal-<n>.log` segments from a flush that was in progress when the process last stopped are spliced back onto the head of `log_file.txt`, which is then replayed in full. The manifest is stored in `manifest.json` and written atomically through a temporary file plus `os.replace`.
 
-When a flush begins, the current WAL is renamed to `log_file.txt.flushing` and a fresh WAL is opened immediately so new writes are never blocked. The `.flushing` file is deleted only after the SSTable is written and the manifest is updated, making the manifest write the commit point for the flush.
+When a flush begins, the current WAL is renamed to `wal-<n>.log` and a fresh `log_file.txt` is opened immediately so new writes are never blocked. That renamed segment is deleted only after the SSTable is written and the manifest is updated, making the manifest write the commit point for the flush.
 
 ## How the Cluster Works
 
@@ -257,14 +257,15 @@ The tests cover:
 Standalone store files:
 
 - `log_file.txt`
-- `log_file.txt.flushing`
-- `seq`
-- `seq.tmp`
+- `wal-<n>.log` (a rotated WAL segment, present only while its flush is in flight)
+- `meta`
+- `meta.tmp`
 - `manifest.json`
 - `manifest.tmp`
 - `sst_<n>`
 - `sst_<n>.index`
 - `sst_<n>.bloom`
+- `LOCK` (one writer process per data directory)
 
 Cluster node files:
 
@@ -277,6 +278,6 @@ Cluster node files:
 ## Limitations
 
 - Keys and values are treated as plain strings.
-- The REPL and WAL format do not safely encode values with spaces.
+- The REPL splits on spaces and lowercases the line, so it can't represent keys or values that contain a space or mixed case. The storage engine and WAL have no such restriction; this is purely a REPL parsing limitation.
 - The cluster protocol is intentionally small and simplified.
 - There is no authentication, encryption, or production hardening.
