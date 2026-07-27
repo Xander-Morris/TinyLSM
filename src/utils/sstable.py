@@ -60,7 +60,7 @@ def write_to_sstable_file(store_path, index, sorted_store):
     with open(store_path(f"sst_{index}"), 'w', encoding='utf-8') as file:
         key_count = 0
 
-        for key, versions in sorted_store:
+        for key, versions in sorted_store.items():
             key_count += 1
             first_version = True
 

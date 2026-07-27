@@ -76,7 +76,7 @@ class BloomFilter:
 def write_bloom_filter(store_path, index, items, false_positive_rate):
     """Build a filter sized for ``items``, persist it, and return it."""
     filter = BloomFilter.for_capacity(len(items), false_positive_rate)
-    for key, _ in items:
+    for key, _ in items.items():
         filter.add(key)
 
     with open(store_path(f"sst_{index}.bloom"), 'w', encoding='utf-8') as file:

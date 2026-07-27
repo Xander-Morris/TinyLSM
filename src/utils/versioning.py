@@ -1,6 +1,5 @@
 """Selection rules for a key's sequence-numbered versions."""
 
-
 def pick_version(versions, at=None):
     """Return the newest version, or the newest version no later than ``at``."""
     if at is None:

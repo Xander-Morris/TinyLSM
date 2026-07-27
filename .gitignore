@@ -17,3 +17,7 @@ replication.log
 snapshot.json
 state.json 
 .flushing 
+meta 
+manifest.tmp 
+manifest.json 
+LOCK 

@@ -17,6 +17,7 @@ from contextlib import contextmanager
 import src.classes.bloom_filter as bloom_filter
 import src.classes.manifest as manifest
 import src.classes.read_write_lock as read_write_lock
+from src.classes.skip_list import SkipList
 import src.config as config
 from src.classes.tombstone import TombstoneType
 from src.utils.file_lock import try_lock_fd, unlock_fd
@@ -31,7 +32,6 @@ from src.utils.sstable import (
 )
 from src.utils.sparse_index import load_sparse_index
 from src.utils.wal import parse_wal_record, format_wal_record, load_wal
-from src.utils.memtable import memtable_iter, get_raw_value_from_table_at
 from src.utils.compaction import chunk_by_target_size
 
 _TOMBSTONE = TombstoneType()
@@ -45,11 +45,11 @@ class KVStore:
             file.  The current working directory is used when omitted.
 
     A store permits multiple concurrent readers but only one writer at a time.
-    It also permits one process per data directory, enforced by ``LOCK``.
+    It also permits one process per data directory, enforced by LOCK.
     """
 
     def __init__(self, data_dir=None):
-        """Open ``data_dir``, recover published data, and acquire its lock."""
+        """Open data_dir, recover published data, and acquire its lock."""
         self._data_dir = os.path.abspath(data_dir) if data_dir else os.path.abspath(os.getcwd())
         os.makedirs(self._data_dir, exist_ok=True)
 
@@ -69,7 +69,7 @@ class KVStore:
             self._lock_fh = None
             raise RuntimeError(f"Another process holds the lock on {self._data_dir}")
 
-        self._store = {}
+        self._store = SkipList()
         self._active_snapshots = Counter()
         self._imm_memtable = None
         self._imm_entries = 0
@@ -283,7 +283,7 @@ class KVStore:
         next_entries = [entry for entry in self._manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
         merged = {}
 
-        def read_from_entries_list(entries_list):
+        def _read_from_entries_list(entries_list):
             """Add every version from one compaction input set to ``merged``."""
             for entry in entries_list:
                 index = sst_index(entry)
@@ -293,8 +293,8 @@ class KVStore:
                         merged[key] = []
                     merged[key].append((seq, value))
 
-        read_from_entries_list(next_entries)
-        read_from_entries_list(entries)
+        _read_from_entries_list(next_entries)
+        _read_from_entries_list(entries)
 
         oldest_snapshot = self._oldest_active_snapshot_seq()
         compacted = {}
@@ -365,14 +365,14 @@ class KVStore:
 
     def _flush(self):
         """Rotate the mutable memtable and flush it on a background thread."""
-        if self._imm_memtable is not None:
+        if self._imm_memtable:
             return
 
         self._index_counter += 1
         index = self._index_counter
         self._imm_memtable = self._store
         self._imm_entries = self._entries
-        self._store = {}
+        self._store = SkipList()
         self._entries = 0
         self._wal.flush()
         os.fsync(self._wal.fileno())
@@ -387,9 +387,9 @@ class KVStore:
             try:
                 if not self._imm_memtable:
                     return
-                sorted_store = sorted(self._imm_memtable.items())
-                write_result = write_to_sstable_file(self._path, index, sorted_store)
-                bf = bloom_filter.write_bloom_filter(self._path, index, sorted_store, config.BLOOM_FALSE_POSITIVE_RATE)
+                all_entries = self._imm_memtable.get_all_entries_dict()
+                write_result = write_to_sstable_file(self._path, index, all_entries)
+                bf = bloom_filter.write_bloom_filter(self._path, index, all_entries, config.BLOOM_FALSE_POSITIVE_RATE)
 
                 with self._lock.write():
                     self._sparse_indexes[index] = write_result[0]
@@ -440,9 +440,7 @@ class KVStore:
 
     def _set_key_seq_value(self, key: str, value, seq: int):
         """Append one already-sequenced value to the active memtable."""
-        if key not in self._store:
-            self._store[key] = []
-        self._store[key].append((seq, value))
+        self._store.insert(key, seq, value)
         val_size = _TOMBSTONE_BYTES if value is _TOMBSTONE else len(value)
         self._entries += len(key) + val_size
 
@@ -473,18 +471,18 @@ class KVStore:
 
         Args:
             key: Key to look up.
-            at: Optional snapshot sequence returned by :meth:`snapshot`.
-        """
+            at: Optional snapshot sequence returned by `snapshot`.
+        """        
         with self._lock.read():
-            if key in self._store:
-                raw_value = get_raw_value_from_table_at(self._store, key, at)
-                if raw_value is not None:
-                    return None if raw_value is _TOMBSTONE else raw_value
+            search_result = self._store.search(key, at)
 
-            if self._imm_memtable is not None and key in self._imm_memtable:
-                raw_value = get_raw_value_from_table_at(self._imm_memtable, key, at)
-                if raw_value is not None:
-                    return None if raw_value is _TOMBSTONE else raw_value
+            if search_result is not None: 
+                return None if search_result is _TOMBSTONE else search_result
+
+            if self._imm_memtable is not None:
+                imm_memtable_search_result = self._imm_memtable.search(key, at)
+                if imm_memtable_search_result:
+                    return None if imm_memtable_search_result is _TOMBSTONE else imm_memtable_search_result
 
             sorted_entries = sorted(
                 self._manifest.entries,
@@ -533,9 +531,9 @@ class KVStore:
             for entry in sorted(self._manifest.entries, key=lambda e: (e["level"], -sst_index(e))):
                 index = sst_index(entry)
                 sources.append(iter_sstable_from(self._path, index, self._sparse_indexes[index], start))
-            if self._imm_memtable is not None:
-                sources.append(memtable_iter(self._imm_memtable))
-            sources.append(memtable_iter(self._store))
+            if self._imm_memtable:
+                sources.append(self._imm_memtable.get_range_iter(start, end))
+            sources.append(self._store.get_range_iter(start, end))
 
             seen_key = None
             best_seq = -1
@@ -582,17 +580,29 @@ class KVStore:
 
             memtable_size = self._entries + self._imm_entries
 
-            def newest_memtable_value(key):
-                """Return key's newest memtable value, preferring the active memtable."""
-                if key in self._store:
-                    return self._store[key][-1][1]
-                if self._imm_memtable:
-                    return self._imm_memtable[key][-1][1]
-
-            live_keys = set(self._store)
+            memtable_sources = [self._store.get_all_entries_iter()]
             if self._imm_memtable:
-                live_keys |= set(self._imm_memtable)
-            keys_num = sum(1 for key in live_keys if newest_memtable_value(key) is not _TOMBSTONE)
+                memtable_sources.append(self._imm_memtable.get_all_entries_iter())
+
+            keys_num = 0
+            seen_key = None
+            best_seq = -1
+            best_value = None
+
+            for key, seq, value in heapq.merge(*memtable_sources):
+                if key != seen_key:
+                    if seen_key is not None and best_value is not _TOMBSTONE:
+                        keys_num += 1
+                    seen_key = key
+                    best_seq = seq
+                    best_value = value
+                elif seq > best_seq:
+                    best_seq = seq
+                    best_value = value
+
+            if seen_key is not None and best_value is not _TOMBSTONE:
+                keys_num += 1
+
             write_amplification = self._bytes_written_disk / self._bytes_written_user if self._bytes_written_user != 0 else 0
 
             return {
@@ -611,10 +621,10 @@ class KVStore:
         return dict(self.scan("", "\U0010FFFF"))
 
     def set(self, key: str, value: str):
-        """Durably queue ``value`` as the newest value for ``key``."""
+        """Durably queue value as the newest value for key."""
         while True:
             with self._lock.write():
-                if self._imm_memtable is not None and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
+                if self._imm_memtable and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
                     pass  # fall through to wait
                 else:
                     self._seq += 1
@@ -625,10 +635,10 @@ class KVStore:
             self._wait_for_flush_to_drain()
 
     def delete(self, key: str):
-        """Durably mark ``key`` deleted with a tombstone."""
+        """Durably mark key deleted with a tombstone."""
         while True:
             with self._lock.write():
-                if self._imm_memtable is not None and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
+                if self._imm_memtable and self._entries >= 2 * config.MAX_MEMTABLE_SIZE:
                     pass
                 else:
                     self._seq += 1

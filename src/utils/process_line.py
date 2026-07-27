@@ -1,4 +1,6 @@
-"""Command parsing for TinyLSM's intentionally small interactive REPL."""
+"""
+    Command parsing for TinyLSM's intentionally small interactive REPL.
+"""
 
 import inspect
 
@@ -16,8 +18,8 @@ _commands = {
         "exec": lambda store, key: store.delete(key),
     },
     "get": {
-        "syntax": "GET key",
-        "exec": lambda store, key: store.get(key),
+        "syntax": "GET key at (Note that 'at' is optional)",
+        "exec": lambda store, key, at: store.get(key, int(at)),
     },
     "stats": {
         "syntax": "STATS",
