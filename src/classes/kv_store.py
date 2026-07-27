@@ -31,7 +31,7 @@ from src.utils.sstable import (
     cleanup_orphan_sst_files,
 )
 from src.utils.sparse_index import load_sparse_index
-from src.utils.wal import parse_wal_record, format_wal_record, load_wal
+from src.utils.wal import read_wal_records, format_wal_record, load_wal
 from src.utils.compaction import chunk_by_target_size
 
 _TOMBSTONE = TombstoneType()
@@ -94,14 +94,13 @@ class KVStore:
             load_wal(self._path)
 
             try:
-                with open(self._path(config.LOG_FILE_NAME), 'r', encoding='utf-8') as file:
-                    for line in file:
-                        if not self._replay_line(line):
-                            break
+                with open(self._path(config.LOG_FILE_NAME), 'rb') as file:
+                    for record in read_wal_records(file):
+                        self._replay_record(record)
             except FileNotFoundError:
                 pass
 
-            self._wal = open(self._path(config.LOG_FILE_NAME), 'a', encoding='utf-8')
+            self._wal = open(self._path(config.LOG_FILE_NAME), 'ab')
         except Exception:
             self._release_directory_lock()
             raise
@@ -237,12 +236,9 @@ class KVStore:
             os.fsync(self._wal.fileno())
             self._wal_buffer_count = 0
 
-    def _replay_line(self, line):
-        """Replay one valid WAL line, returning ``False`` for a damaged record."""
-        record = parse_wal_record(line)
-        if record is None:
-            return False
-        seq = int(record["seq"])
+    def _replay_record(self, record):
+        """Apply one decoded WAL record to the active memtable."""
+        seq = record["seq"]
         if seq > self._seq:
             self._seq = seq
         key = record["key"]
@@ -250,7 +246,6 @@ class KVStore:
             self._set_key_seq_value(key, record["value"], seq)
         elif record["op"] == "DELETE":
             self._set_key_seq_value(key, _TOMBSTONE, seq)
-        return True
 
     def _write_sstable(self, index, data):
         """Write an SSTable, then publish its in-memory search sidecars."""
@@ -380,7 +375,7 @@ class KVStore:
         wal_file_name = f"wal-{self._wal_counter_index}.log"
         self._wal_counter_index += 1 # increment index for file name of next WAL that is written to
         os.rename(self._path(config.LOG_FILE_NAME), self._path(wal_file_name))
-        self._wal = open(self._path(config.LOG_FILE_NAME), 'a', encoding='utf-8')
+        self._wal = open(self._path(config.LOG_FILE_NAME), 'ab')
 
         def _threaded_funct():
             """Write the immutable memtable, then publish it under the write lock."""
