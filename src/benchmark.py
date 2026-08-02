@@ -5,6 +5,7 @@ import os
 import time
 import tempfile
 import shutil
+import statistics
 import threading
 import src.config as config
 
@@ -23,22 +24,29 @@ def configure_benchmark_defaults():
     config.MAX_L0_FILES = int(os.getenv("BENCHMARK_MAX_L0_FILES", BENCHMARK_DEFAULTS["MAX_L0_FILES"]))
     config.WAL_BUFFER_SIZE = int(os.getenv("BENCHMARK_WAL_BUFFER_SIZE", BENCHMARK_DEFAULTS["WAL_BUFFER_SIZE"]))
 
+def _percentiles_ms(latencies):
+    """Return (p50, p99) latency in milliseconds for a list of per-op seconds."""
+    quantiles = statistics.quantiles(latencies, n=100, method="inclusive")
+    return quantiles[49] * 1000, quantiles[98] * 1000
+
 def do_benchmark_funct(store, n, funct_type):
-    """Run one named workload ``n`` times and return its elapsed seconds."""
-    start = time.perf_counter()
+    """Run one named workload ``n`` times and return (elapsed seconds, per-op latencies)."""
     ops = {
         "writes": lambda i: store.set(f"test_key_{i}", f"test_value_{i}"),
         "reads": lambda i: store.get(f"test_key_{i}"),
         "misses": lambda i: store.get(f"missing_key_{i}")
     }
     op = ops[funct_type]
+    latencies = [0.0] * n
 
+    start = time.perf_counter()
     for i in range(0, n):
+        op_start = time.perf_counter()
         op(i)
-
+        latencies[i] = time.perf_counter() - op_start
     end = time.perf_counter()
-    
-    return end - start 
+
+    return end - start, latencies
 
 def benchmark_reads(store, n):
     """Measure sequential point reads for keys written by the benchmark."""
@@ -53,15 +61,20 @@ def benchmark_writes(store, n):
     return do_benchmark_funct(store, n, "writes")
 
 def benchmark_concurrent_reads(store, n, num_threads):
-    """Measure point reads split evenly across ``num_threads`` workers."""
+    """Measure point reads split evenly across ``num_threads`` workers, returning (elapsed seconds, per-op latencies)."""
     per_thread = n // num_threads
-    threads = []
+    latencies = [0.0] * (per_thread * num_threads)
 
-    for t in range(num_threads):
-        start_i = t * per_thread
-        end_i = start_i + per_thread
-        thread = threading.Thread(target=lambda s=start_i, e=end_i: [store.get(f"test_key_{i}") for i in range(s, e)])
-        threads.append(thread)
+    def _worker(start_i, end_i):
+        for i in range(start_i, end_i):
+            op_start = time.perf_counter()
+            store.get(f"test_key_{i}")
+            latencies[i] = time.perf_counter() - op_start
+
+    threads = [
+        threading.Thread(target=_worker, args=(t * per_thread, t * per_thread + per_thread))
+        for t in range(num_threads)
+    ]
 
     start = time.perf_counter()
 
@@ -71,7 +84,7 @@ def benchmark_concurrent_reads(store, n, num_threads):
     for thread in threads:
         thread.join()
 
-    return time.perf_counter() - start
+    return time.perf_counter() - start, latencies
 
 def setup():
     """Create an isolated temporary store for one benchmark run."""
@@ -93,15 +106,22 @@ def main():
             f"MAX_L0_FILES={config.MAX_L0_FILES}, "
             f"WAL_BUFFER_SIZE={config.WAL_BUFFER_SIZE}..."
         )
-        total_write_time = benchmark_writes(store, config.BENCHMARK_N)
-        print(f"Writes: {config.BENCHMARK_N} ops in {total_write_time:.2f}s -> {int(config.BENCHMARK_N / total_write_time)} ops/sec")
-        total_read_time = benchmark_reads(store, config.BENCHMARK_N)
-        print(f"Reads (1 thread):  {config.BENCHMARK_N} ops in {total_read_time:.2f}s -> {int(config.BENCHMARK_N / total_read_time)} ops/sec")
+        def _report(label, n, total_time, latencies):
+            p50, p99 = _percentiles_ms(latencies)
+            print(f"{label}: {n} ops in {total_time:.2f}s -> {int(n / total_time)} ops/sec (p50={p50:.3f}ms, p99={p99:.3f}ms)")
+
+        total_write_time, write_latencies = benchmark_writes(store, config.BENCHMARK_N)
+        _report("Writes", config.BENCHMARK_N, total_write_time, write_latencies)
+
+        total_read_time, read_latencies = benchmark_reads(store, config.BENCHMARK_N)
+        _report("Reads (1 thread) ", config.BENCHMARK_N, total_read_time, read_latencies)
+
         num_threads = 4
-        concurrent_read_time = benchmark_concurrent_reads(store, config.BENCHMARK_N, num_threads)
-        print(f"Reads ({num_threads} threads): {config.BENCHMARK_N} ops in {concurrent_read_time:.2f}s -> {int(config.BENCHMARK_N / concurrent_read_time)} ops/sec")
-        total_misses_time = benchmark_misses(store, config.BENCHMARK_N)
-        print(f"Misses: {config.BENCHMARK_N} ops in {total_misses_time:.2f}s -> {int(config.BENCHMARK_N / total_misses_time)} ops/sec")
+        concurrent_read_time, concurrent_latencies = benchmark_concurrent_reads(store, config.BENCHMARK_N, num_threads)
+        _report(f"Reads ({num_threads} threads)", len(concurrent_latencies), concurrent_read_time, concurrent_latencies)
+
+        total_misses_time, miss_latencies = benchmark_misses(store, config.BENCHMARK_N)
+        _report("Misses", config.BENCHMARK_N, total_misses_time, miss_latencies)
     finally:
         store.close()
         os.chdir(original_dir)

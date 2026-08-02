@@ -77,3 +77,35 @@ def test_election_after_leader_failure(tmp_path_factory):
         for port in survivors:
             procs[port].terminate()
             procs[port].wait()
+
+def test_vote_granted_once_per_term(tmp_path_factory):
+    port = 8310
+    _kill_port(port)
+    url = f"http://localhost:{port}"
+    data_dir = tmp_path_factory.mktemp("vote_once")
+    # A node that is its own leader never runs its own election timer, so its
+    # term only moves when these direct /vote calls move it.
+    proc = start_node(port, data_dir, url, url)
+
+    try:
+        ok = wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
+        assert ok, f"Node on port {port} did not start in time"
+
+        term = 1
+        candidate_a = "http://localhost:9001"
+        candidate_b = "http://localhost:9002"
+
+        # First candidate to ask for this term gets the vote.
+        first = requests.post(f"{url}/vote", json={"candidate_url": candidate_a, "term": term}, timeout=2)
+        assert first.json()["vote_granted"] is True
+
+        # A second candidate racing for the same term must be refused, or the cluster could split.
+        second = requests.post(f"{url}/vote", json={"candidate_url": candidate_b, "term": term}, timeout=2)
+        assert second.json()["vote_granted"] is False
+
+        # Once the term advances, voting reopens.
+        later = requests.post(f"{url}/vote", json={"candidate_url": candidate_b, "term": term + 1}, timeout=2)
+        assert later.json()["vote_granted"] is True
+    finally:
+        proc.terminate()
+        proc.wait()

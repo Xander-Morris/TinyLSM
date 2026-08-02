@@ -1,5 +1,7 @@
 # TinyLSM
 
+[![CI](https://github.com/Xander-Morris/TinyLSM/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Morris/TinyLSM/actions/workflows/ci.yml)
+
 TinyLSM is a small Python key-value store built to explore LSM-tree storage ideas in code. It started as a learning project while reading Designing Data-Intensive Applications, and the repo now includes both a local storage engine and a simple replicated HTTP cluster built on top of it.
 
 It is not meant to be a production database. It is meant to be readable, hackable, and useful for learning how the pieces fit together.
@@ -222,16 +224,16 @@ Run:
 python -m src.benchmark
 ```
 
-The benchmark script creates a temporary store, runs writes, single-threaded reads, 4-thread reads, and misses, then prints ops/sec for your machine.
+The benchmark script creates a temporary store, runs writes, single-threaded reads, 4-thread reads, and misses, then prints ops/sec and p50/p99 latency for your machine.
 
 Example output with certain configurations on my personal computer:
 
 ```text
 Doing the benchmarks with N=100000, MAX_MEMTABLE_SIZE=1048576, MAX_L0_FILES=8, WAL_BUFFER_SIZE=1000...
-Writes: 100000 ops in 0.64s -> 155594 ops/sec
-Reads (1 thread):  100000 ops in 0.18s -> 558577 ops/sec
-Reads (4 threads): 100000 ops in 0.19s -> 519888 ops/sec
-Misses: 100000 ops in 0.19s -> 514599 ops/sec
+Writes: 100000 ops in 0.79s -> 127045 ops/sec (p50=0.006ms, p99=0.019ms)
+Reads (1 thread) : 100000 ops in 0.44s -> 225567 ops/sec (p50=0.004ms, p99=0.010ms)
+Reads (4 threads): 100000 ops in 0.45s -> 221061 ops/sec (p50=0.004ms, p99=0.009ms)
+Misses: 100000 ops in 0.41s -> 246163 ops/sec (p50=0.004ms, p99=0.008ms)
 ```
 
 ## Tests
