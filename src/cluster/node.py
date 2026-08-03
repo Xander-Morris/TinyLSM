@@ -66,12 +66,17 @@ def _send_heartbeats():
 
 
 def _start_election():
-    """Run an election for local leadership after a heartbeat timeout.
+    """Gate a real election behind a pre-vote round after a heartbeat timeout.
 
-    The previous pre-vote gate could livelock two followers: the first follower
-    reset after the second denied an early pre-vote, then denied the second
-    follower for the same reason.  Starting the normal, term-based election
-    directly lets the randomized election deadlines break that cycle.
+    A pre-vote round runs first so an isolated node cannot bump the cluster
+    term just because it stopped hearing from the leader.  An earlier version
+    of this gate could livelock two followers: a failed pre-vote reset the
+    candidate's own heartbeat clock as if it had heard from a leader, and that
+    reset is exactly what made it deny the other follower's pre-vote moments
+    later, forever.  A failed pre-vote here leaves the clock untouched instead,
+    so elapsed time keeps growing and a later retry breaks the tie.  The clock
+    is only reset by ``_election_timeout_watcher`` after a real, term-bumping
+    election attempt.
     """
     def _send_vote_requests_to_all_other_nodes(vote_term, prevote=False):
         """Collect enough pre-votes or votes to form the current majority."""
@@ -104,7 +109,15 @@ def _start_election():
 
     with ctx.state:
         if ctx.state.leader == ctx.my_url:
-            return
+            return False
+        candidate_term = ctx.state.term + 1
+
+    if not _send_vote_requests_to_all_other_nodes(candidate_term, prevote=True):
+        return False
+
+    with ctx.state:
+        if ctx.state.leader == ctx.my_url:
+            return False
         ctx.state.term += 1
         ctx.state.voted_for = ctx.my_url
         my_term = ctx.state.term
@@ -118,6 +131,8 @@ def _start_election():
                 ctx.state.leader = ctx.my_url
                 ctx.state.last_heartbeat = time.time()
         threading.Thread(target=_send_heartbeats, daemon=True).start()
+
+    return True
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
@@ -169,7 +184,14 @@ if __name__ == "__main__":
     ctx.state.last_heartbeat = time.time()
 
     def _election_timeout_watcher():
-        """Start an election when this follower has missed its leader's heartbeat."""
+        """Start an election when this follower has missed its leader's heartbeat.
+
+        The randomized deadline is only re-rolled after a real, term-bumping
+        election attempt. A pre-vote that fails to reach quorum leaves the
+        deadline alone, so elapsed time keeps growing toward it instead of
+        resetting - see ``_start_election`` for why that reset used to livelock
+        two followers denying each other's pre-vote in turn.
+        """
         while True:
             with ctx.state:
                 leader = ctx.state.leader
@@ -177,10 +199,11 @@ if __name__ == "__main__":
                 timeout = ctx.state.election_timeout
 
             if leader != ctx.my_url and elapsed > timeout:
-                _start_election()
-                with ctx.state:
-                    ctx.state.election_timeout = random.uniform(0.5, 1.5)
-                    ctx.state.last_heartbeat = time.time()
+                attempted_real_election = _start_election()
+                if attempted_real_election:
+                    with ctx.state:
+                        ctx.state.election_timeout = random.uniform(0.5, 1.5)
+                        ctx.state.last_heartbeat = time.time()
 
             time.sleep(0.05)
 

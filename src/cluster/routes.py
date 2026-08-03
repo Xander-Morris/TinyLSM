@@ -119,8 +119,19 @@ def vote(req: models.VoteRequest):
 
 @router.post("/prevote")
 def prevote(req: models.VoteRequest):
-    """Report whether this node currently appears ready for an election."""
+    """Report whether this node currently appears ready for an election.
+
+    A node that believes itself the leader answering this request at all is
+    proof it is still alive, so it must refuse regardless of elapsed time.
+    ``last_heartbeat`` is only ever set once, at the moment a node wins an
+    election, and is never refreshed afterward - so without this check, any
+    leader that outlives half of its own election timeout would start
+    granting pre-votes to challengers despite still actively sending
+    heartbeats.
+    """
     with ctx.state:
+        if ctx.state.leader == ctx.my_url:
+            return {"vote_granted": False}
         elapsed = time.time() - ctx.state.last_heartbeat
         timeout = ctx.state.election_timeout
     return {"vote_granted": elapsed > timeout * 0.5}
