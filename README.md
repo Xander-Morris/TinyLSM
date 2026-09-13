@@ -170,12 +170,12 @@ Every write is appended to the WAL and applied to the active memtable. Once the 
 Reads check the active memtable first, then the immutable memtable, then SSTables. SSTable lookups use:
 
 - Manifest key ranges to skip unrelated files
-- Bloom filters to skip SSTables that cannot contain the key. Each filter is sized at creation time using the number of keys in the SSTable and the configured false positive rate (`BLOOM_FALSE_POSITIVE_RATE`). Bit count and hash function count are both derived from those two inputs using standard formulas, and both are stored in the `.bloom` file so the filter can be correctly reconstructed on reload.
+- Bloom filters to skip SSTables that cannot contain the key. Each filter is sized at creation time using the number of keys in the SSTable and the configured false positive rate (`BLOOM_FALSE_POSITIVE_RATE`). Bit count and hash function count are both derived from those two inputs using standard formulas, and both are stored in the `.bloom` file so the filter can be correctly reconstructed on reload. Each key is hashed once with BLAKE2b, and the bit positions are derived from that one digest by double hashing. The `.bloom` file is binary with a CRC32; filters written in the older text format still load with their original hashing.
 - Sparse indexes to seek close to the target key before scanning
 
 ### SSTables and Compaction
 
-Each SSTable record stores `key seq value checksum`. The checksum is verified on read. L0 files may overlap. When enough L0 files build up, they are compacted into the next level along with overlapping files there. During compaction, overwritten versions are dropped and tombstones are removed once older data can no longer resurface from a lower level.
+Each SSTable record stores `key seq value checksum`. The checksum is verified on read. L0 files may overlap. When enough L0 files build up, they are compacted into the next level along with overlapping files there. During compaction, overwritten versions are dropped and tombstones are removed once older data can no longer resurface from a lower level. Compaction merges and writes its output without holding the store lock, so reads and writes keep going; the write lock is held only for the brief manifest swap. If L0 grows to three times `MAX_L0_FILES` while a compaction is running, the next flush waits for it, which slows writers instead of letting L0 grow without bound.
 
 ### Snapshot Reads
 

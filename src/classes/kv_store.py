@@ -36,6 +36,9 @@ from src.utils.compaction import chunk_by_target_size
 
 _TOMBSTONE = TombstoneType()
 _TOMBSTONE_BYTES = 1  # Accounting weight for tombstone marker in memtable
+# A flush waits for the running compaction before publishing once L0 holds
+# this many times MAX_L0_FILES, so L0 (and read cost) cannot grow unbounded.
+_L0_STOP_MULTIPLIER = 3
 
 class KVStore:
     """A small, thread-safe key-value store backed by an LSM tree.
@@ -83,7 +86,11 @@ class KVStore:
         self._bloom_filters = {}
         self._sparse_indexes = {}
         self._flush_thread = None
+        self._flush_threads = []
         self._flush_drained = threading.Condition()
+        # Serializes compactions.  Held while merging, never while waiting on
+        # the store lock's writers, so reads and writes continue meanwhile.
+        self._compaction_lock = threading.Lock()
 
         try:
             self._manifest = manifest.Manifest.load(self._data_dir)
@@ -248,34 +255,55 @@ class KVStore:
             self._set_key_seq_value(key, _TOMBSTONE, seq)
 
     def _write_sstable(self, index, data):
-        """Write an SSTable, then publish its in-memory search sidecars."""
-        write_result = write_to_sstable_file(self._path, index, data)
-        self._sparse_indexes[index] = write_result[0]
-        self._write_bloom_filter(data, index)
-        self._bytes_written_disk += os.path.getsize(self._path(f"sst_{index}"))
+        """Durably write an SSTable and its sidecars without publishing them.
 
-        return write_result
+        Touches no shared state, so it is safe to call without the store lock.
 
-    def _write_bloom_filter(self, items, index):
-        """Build and persist the bloom filter used to skip SSTable reads."""
-        self._bloom_filters[index] = bloom_filter.write_bloom_filter(
-            self._path, index, items, config.BLOOM_FALSE_POSITIVE_RATE
-        )
+        Returns:
+            tuple: ``(sparse_index, bloom_filter, min_key, max_key, size_bytes)``
+        """
+        sparse, min_key, max_key = write_to_sstable_file(self._path, index, data)
+        bf = bloom_filter.write_bloom_filter(self._path, index, data, config.BLOOM_FALSE_POSITIVE_RATE)
+        size = os.path.getsize(self._path(f"sst_{index}"))
+
+        return sparse, bf, min_key, max_key, size
+
+    def _publish_sstable_sidecars(self, index, sparse, bf, size):
+        """Make a written SSTable's sidecars searchable.  Caller holds the write lock."""
+        self._sparse_indexes[index] = sparse
+        self._bloom_filters[index] = bf
+        self._bytes_written_disk += size
+
+    def _level_file_count(self, level):
+        """Return how many published SSTables sit in ``level``."""
+        with self._lock.read():
+            return sum(1 for entry in self._manifest.entries if entry["level"] == level)
 
     def _compact_level(self, level):
         """Merge one level into the next while preserving pinned snapshots.
 
-        The caller holds the store write lock.  This makes the active snapshot
-        set stable while versions are selected and the manifest is replaced.
+        The caller holds the compaction lock, but not the store lock. Input
+        SSTables are immutable and only compaction removes them, so they are
+        read and merged with no store lock held.
+
+        Flushes may add L0 files while this runs. Those hold newer sequences
+        than every input, so they are left alone. A snapshot opened
+        after the inputs are chosen pins a sequence at or above every input
+        version, and the newest version is always kept, so choosing versions
+        with the snapshot set as it was at the start stays safe.
         """
-        entries = [entry for entry in self._manifest.entries if entry["level"] == level]
+        with self._lock.read():
+            manifest_entries = list(self._manifest.entries)
+            oldest_snapshot = self._oldest_active_snapshot_seq()
+
+        entries = [entry for entry in manifest_entries if entry["level"] == level]
 
         if not entries:
             return
 
         overall_min = min(entry["min_key"] for entry in entries)
         overall_max = max(entry["max_key"] for entry in entries)
-        next_entries = [entry for entry in self._manifest.entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
+        next_entries = [entry for entry in manifest_entries if entry["level"] == level + 1 and entry["min_key"] <= overall_max and entry["max_key"] >= overall_min]
         merged = {}
 
         def _read_from_entries_list(entries_list):
@@ -291,7 +319,6 @@ class KVStore:
         _read_from_entries_list(next_entries)
         _read_from_entries_list(entries)
 
-        oldest_snapshot = self._oldest_active_snapshot_seq()
         compacted = {}
         for key, versions in merged.items():
             kept_versions = self._versions_to_keep(versions, oldest_snapshot)
@@ -299,12 +326,14 @@ class KVStore:
             # Without a pinned snapshot, the newest tombstone may be dropped
             # only if no lower level can still contain an older value.  With a
             # pinned snapshot, tombstones are data too: an old read may need to
-            # observe either the tombstone or the value before it.
+            # observe either the tombstone or the value before it.  Levels
+            # below level + 1 change only through compaction, so the copy of
+            # the manifest taken above is still accurate for them.
             if oldest_snapshot is None and kept_versions[0][1] is _TOMBSTONE:
                 has_older = any(
                     entry["level"] > level + 1
                     and entry["min_key"] <= key <= entry["max_key"]
-                    for entry in self._manifest.entries
+                    for entry in manifest_entries
                 )
                 if not has_older:
                     continue
@@ -313,44 +342,47 @@ class KVStore:
 
         merged = sorted(compacted.items())
 
-        """
-            Step 1: write all new SST files (data, bloom, index) durably to disk
-            BEFORE touching the manifest or deleting old files. Crash before
-            manifest update = orphan new files cleaned on next boot.
-        """
         target_sstable_size = config.MAX_MEMTABLE_SIZE * (10 ** (level + 1))
-        new_entries = []
-        for chunk in chunk_by_target_size(merged, target_sstable_size):
-            self._index_counter += 1
-            new_idx = self._index_counter
-            self._write_sstable(new_idx, chunk)
-            new_entries.append((level + 1, f"sst_{new_idx}", chunk[0][0], chunk[-1][0]))
+        chunks = chunk_by_target_size(merged, target_sstable_size)
 
-        # Step 2: single atomic manifest update - add new and remove old together.
-        for lvl, fname, mink, maxk in new_entries:
-            self._manifest.add(lvl, fname, mink, maxk)
-        for entry in entries + next_entries:
-            self._manifest.remove(entry["file_name"])
-        self._manifest.save()
+        with self._lock.write():
+            first_idx = self._index_counter + 1
+            self._index_counter += len(chunks)
 
-        # Step 3: delete old files. Crash here = orphan old files cleaned on boot.
-        for entry in entries + next_entries:
+        outputs = []
+        for offset, chunk in enumerate(chunks):
+            new_idx = first_idx + offset
+            outputs.append((new_idx, self._write_sstable(new_idx, chunk)))
+
+        old_entries = entries + next_entries
+        with self._lock.write():
+            for new_idx, (sparse, bf, min_key, max_key, size) in outputs:
+                self._publish_sstable_sidecars(new_idx, sparse, bf, size)
+                self._manifest.add(level + 1, f"sst_{new_idx}", min_key, max_key)
+            for entry in old_entries:
+                self._manifest.remove(entry["file_name"])
+                self._bloom_filters.pop(sst_index(entry), None)
+                self._sparse_indexes.pop(sst_index(entry), None)
+            self._manifest.save()
+
+        for entry in old_entries:
             index = sst_index(entry)
             for ext in ("", ".bloom", ".index"):
                 try:
                     os.remove(self._path(f"sst_{index}{ext}"))
                 except FileNotFoundError:
                     pass
-            self._bloom_filters.pop(index, None)
-            self._sparse_indexes.pop(index, None)
 
     def _compact(self):
-        """Compact levels until the next level is below its file-count limit."""
+        """Compact levels until the next level is below its file-count limit.
+
+        The caller holds ``_compaction_lock``.
+        """
         level = 0
 
         while True:
             self._compact_level(level)
-            next_count = sum(1 for entry in self._manifest.entries if entry["level"] == level + 1)
+            next_count = self._level_file_count(level + 1)
             level_limit = config.MAX_L0_FILES * (10 ** (level + 1))
 
             if next_count < level_limit:
@@ -378,39 +410,52 @@ class KVStore:
         self._wal = open(self._path(config.LOG_FILE_NAME), 'ab')
 
         def _threaded_funct():
-            """Write the immutable memtable, then publish it under the write lock."""
+            """Write the immutable memtable, publish it, then compact if needed.
+
+            Only publishing takes the write lock.  Compaction runs afterwards
+            with the memtable already released, so writers are not held up.
+            """
             try:
                 if not self._imm_memtable:
                     return
                 all_entries = self._imm_memtable.get_all_entries_dict()
-                write_result = write_to_sstable_file(self._path, index, all_entries)
-                bf = bloom_filter.write_bloom_filter(self._path, index, all_entries, config.BLOOM_FALSE_POSITIVE_RATE)
+                sparse, bf, min_key, max_key, size = self._write_sstable(index, all_entries)
+
+                # L0 is far over its limit: keep holding the immutable memtable
+                # (back-pressuring writers) until the running compaction ends.
+                if self._level_file_count(0) >= config.MAX_L0_FILES * _L0_STOP_MULTIPLIER:
+                    with self._compaction_lock:
+                        pass
 
                 with self._lock.write():
-                    self._sparse_indexes[index] = write_result[0]
-                    self._bloom_filters[index] = bf
-                    self._bytes_written_disk += os.path.getsize(self._path(f"sst_{index}"))
-                    self._manifest.add(0, f"sst_{index}", write_result[1], write_result[2])
+                    self._publish_sstable_sidecars(index, sparse, bf, size)
+                    self._manifest.add(0, f"sst_{index}", min_key, max_key)
                     self._manifest.save()
                     try:
                         os.remove(self._path(wal_file_name))
                     except FileNotFoundError:
                         pass
-                    l0_count = sum(1 for entry in self._manifest.entries if entry["level"] == 0)
-                    if l0_count >= config.MAX_L0_FILES:
-                        self._compact()
                     self._imm_memtable = None
                     self._imm_entries = 0
                     try:
                         self._save_meta()
                     except Exception:
                         pass
+
+                with self._flush_drained:
+                    self._flush_drained.notify_all()
+
+                with self._compaction_lock:
+                    if self._level_file_count(0) >= config.MAX_L0_FILES:
+                        self._compact()
             finally:
                 # Wake any writers parked on back-pressure.
                 with self._flush_drained:
                     self._flush_drained.notify_all()
 
+        self._flush_threads = [thread for thread in self._flush_threads if thread.is_alive()]
         self._flush_thread = threading.Thread(target=_threaded_funct)
+        self._flush_threads.append(self._flush_thread)
         self._flush_thread.start()
 
     def _load_sstables(self):
@@ -571,7 +616,10 @@ class KVStore:
             sst_file_names = [f for f in glob.glob(self._path("sst_*")) if "." not in os.path.basename(f)]
 
             for file_name in sst_file_names:
-                total_disk_size += os.path.getsize(file_name)
+                try:
+                    total_disk_size += os.path.getsize(file_name)
+                except FileNotFoundError:
+                    pass  # Compaction removes old files after releasing the lock.
 
             memtable_size = self._entries + self._imm_entries
 
@@ -648,8 +696,9 @@ class KVStore:
         if self._wal.closed:
             return
 
-        if self._flush_thread is not None:
-            self._flush_thread.join()
+        # Earlier flush threads may still be compacting.
+        for thread in self._flush_threads:
+            thread.join()
 
         self._wal.flush()
         os.fsync(self._wal.fileno())

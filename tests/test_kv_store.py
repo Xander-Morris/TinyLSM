@@ -1,4 +1,6 @@
-import pytest 
+import threading
+
+import pytest
 from conftest import force_flush, force_compaction, do_setting, assert_all_readable
 import src.config as config
 import src.classes.kv_store as kv_store 
@@ -216,6 +218,48 @@ def test_pinned_snapshot_preserves_value_before_a_compacted_delete(store, monkey
 
         assert store.get("deleted") is None
         assert store.get("deleted", at=snapshot) == "before"
+
+
+def test_reads_and_writes_proceed_while_compaction_runs(store, monkeypatch):
+    """Compaction must not hold the store lock while it merges."""
+    monkeypatch.setattr(config, "MAX_MEMTABLE_SIZE", 64)
+    monkeypatch.setattr(config, "MAX_L0_FILES", 2)
+
+    started = threading.Event()
+    release = threading.Event()
+    real_chunk = kv_store.chunk_by_target_size
+
+    def blocking_chunk(items, target_size):
+        started.set()
+        release.wait(10)
+        return real_chunk(items, target_size)
+
+    monkeypatch.setattr(kv_store, "chunk_by_target_size", blocking_chunk)
+
+    store.set("before", "compaction")
+    _flush_active_memtable(store, "first")
+    store.set("__flush_second", "x" * config.MAX_MEMTABLE_SIZE)
+    compacting_thread = store._flush_thread
+
+    try:
+        assert started.wait(5), "compaction never started"
+
+        def read_and_write():
+            store.set("during", "compaction")
+            assert store.get("during") == "compaction"
+            assert store.get("before") == "compaction"
+
+        worker = threading.Thread(target=read_and_write)
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive(), "store operations blocked behind compaction"
+    finally:
+        release.set()
+        compacting_thread.join()
+
+    assert store.get("before") == "compaction"
+    assert store.get("during") == "compaction"
+    assert 1 in store.stats()["sstables_per_level"]
 
 
 def test_snapshots_at_the_same_sequence_are_reference_counted(store):
