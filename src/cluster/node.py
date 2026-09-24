@@ -69,14 +69,7 @@ def _start_election():
     """Gate a real election behind a pre-vote round after a heartbeat timeout.
 
     A pre-vote round runs first so an isolated node cannot bump the cluster
-    term just because it stopped hearing from the leader.  An earlier version
-    of this gate could livelock two followers: a failed pre-vote reset the
-    candidate's own heartbeat clock as if it had heard from a leader, and that
-    reset is exactly what made it deny the other follower's pre-vote moments
-    later, forever.  A failed pre-vote here leaves the clock untouched instead,
-    so elapsed time keeps growing and a later retry breaks the tie.  The clock
-    is only reset by ``_election_timeout_watcher`` after a real, term-bumping
-    election attempt.
+    term just because it stopped hearing from the leader.
     """
     def _send_vote_requests_to_all_other_nodes(vote_term, prevote=False):
         """Collect enough pre-votes or votes to form the current majority."""
@@ -187,10 +180,7 @@ if __name__ == "__main__":
         """Start an election when this follower has missed its leader's heartbeat.
 
         The randomized deadline is only re-rolled after a real, term-bumping
-        election attempt. A pre-vote that fails to reach quorum leaves the
-        deadline alone, so elapsed time keeps growing toward it instead of
-        resetting - see ``_start_election`` for why that reset used to livelock
-        two followers denying each other's pre-vote in turn.
+        election attempt.
         """
         while True:
             with ctx.state:
