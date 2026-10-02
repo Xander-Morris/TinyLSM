@@ -17,17 +17,21 @@ class ReplicateRequest(BaseModel):
     key: str
     value: str | None = None
     index: int
+    term: int = 0
 
 class VoteRequest(BaseModel):
     """Payload used for pre-vote and vote requests during an election."""
     candidate_url: str
     term: int
+    last_log_index: int = 0
+    last_log_term: int = 0
 
 class HeartbeatRequest(BaseModel):
-    """Payload carrying leader identity, term, and follower catch-up entries."""
+    """Payload carrying leader identity, term, commit point, and catch-up entries."""
     leader_url: str
     term: int
     entries: list = []
+    commit_index: int = 0
 
 class NodeRequest(BaseModel):
     """Payload for a cluster membership change."""

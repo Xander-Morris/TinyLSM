@@ -109,3 +109,36 @@ def test_vote_granted_once_per_term(tmp_path_factory):
     finally:
         proc.terminate()
         proc.wait()
+
+def test_vote_refused_to_candidate_with_stale_log(tmp_path_factory):
+    port = 8320
+    _kill_port(port)
+    url = f"http://localhost:{port}"
+    data_dir = tmp_path_factory.mktemp("stale_log_vote")
+    proc = start_node(port, data_dir, url, url)
+
+    try:
+        ok = wait_for(lambda: requests.get(f"{url}/get", params={"key": "__health__"}, timeout=2).status_code == 200, timeout=15.0)
+        assert ok, f"Node on port {port} did not start in time"
+
+        # Give this node one committed entry so its log is at index 1.
+        assert requests.post(f"{url}/set", json={"key": "k", "value": "v"}, timeout=5).json()["ok"] is True
+        log_term = requests.get(f"{url}/status", timeout=2).json()["term"]
+        term = log_term + 5
+
+        # A candidate missing that entry must lose, or a committed write could vanish.
+        stale = requests.post(f"{url}/vote", json={
+            "candidate_url": "http://localhost:9001", "term": term,
+            "last_log_index": 0, "last_log_term": 0,
+        }, timeout=2)
+        assert stale.json()["vote_granted"] is False
+
+        # Refusing the stale candidate must not use up this term's vote.
+        current = requests.post(f"{url}/vote", json={
+            "candidate_url": "http://localhost:9002", "term": term,
+            "last_log_index": 1, "last_log_term": log_term,
+        }, timeout=2)
+        assert current.json()["vote_granted"] is True
+    finally:
+        proc.terminate()
+        proc.wait()

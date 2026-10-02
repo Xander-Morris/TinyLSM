@@ -32,14 +32,15 @@ def sync(from_index: int):
     with ctx.state:
         current_snapshot_index = ctx.state.snapshot_index
         log_copy = list(ctx.state.log)
+        commit_index = ctx.state.commit_index
 
     if from_index < current_snapshot_index:
         with open(ctx.SNAPSHOT_FILE) as f:
             snapshot = json.loads(f.read())
         entries = [e for e in log_copy if e["index"] > current_snapshot_index]
-        return {"snapshot": snapshot, "entries": entries}
+        return {"snapshot": snapshot, "entries": entries, "commit_index": commit_index}
     else:
-        return {"entries": [e for e in log_copy if e["index"] > from_index]}
+        return {"entries": [e for e in log_copy if e["index"] > from_index], "commit_index": commit_index}
 
 @router.post("/set")
 def set(req: models.SetRequest):
@@ -63,7 +64,7 @@ def remove_node(req: models.NodeRequest):
 
 @router.post("/heartbeat")
 def heartbeat(req: models.HeartbeatRequest):
-    """Accept a leader heartbeat and apply any newly supplied entries."""
+    """Accept a leader heartbeat, append its entries, and apply what it says is committed."""
     with ctx.state:
         current_term = ctx.state.term
 
@@ -71,26 +72,21 @@ def heartbeat(req: models.HeartbeatRequest):
         with ctx.state:
             return {"ok": True, "log_index": ctx.state.log_index}
 
-    new_entries, log_index = ctx._update_state_from_heartbeat(req)
-
-    for entry in new_entries:
-        ctx._handle_operation(entry["operation"], entry["key"], entry["value"])
-        ctx._append_log_entry(entry)
+    log_index = ctx._update_state_from_heartbeat(req)
+    ctx._apply_committed()
 
     return {"ok": True, "log_index": log_index}
 
 @router.post("/replicate")
 def replicate(req: models.ReplicateRequest):
-    """Apply and persist one entry sent directly by the leader."""
-    ctx._handle_operation(req.operation, req.key, req.value)
+    """Persist one entry sent directly by the leader without applying it.
 
-    entry = {"index": req.index, "operation": req.operation, "key": req.key, "value": req.value}
-    with ctx.state:
-        ctx.state.log_index = req.index
-        ctx.state.log.append(entry)
-
-    ctx._append_log_entry(entry)
-    return {"ok": True}
+    The entry reaches the store only after a later heartbeat reports that a
+    majority holds it.
+    """
+    entry = {"index": req.index, "term": req.term, "operation": req.operation, "key": req.key, "value": req.value}
+    log_index = ctx._append_entries([entry])
+    return {"ok": True, "log_index": log_index}
 
 @router.get("/status")
 def status():
@@ -100,13 +96,23 @@ def status():
 
 @router.post("/vote")
 def vote(req: models.VoteRequest):
-    """Grant at most one vote per eligible term and persist that decision."""
+    """Grant at most one vote per term, only to a candidate whose log is current."""
     vote_granted = False
     save_data = None
 
     with ctx.state:
-        if req.term > ctx.state.term or (req.term == ctx.state.term and (ctx.state.voted_for is None or ctx.state.voted_for == req.candidate_url)):
+        if req.term > ctx.state.term:
+            # A newer term always wins, even when this candidate's log is too
+            # stale to earn our vote, so a later candidate can still be elected.
             ctx.state.term = req.term
+            ctx.state.voted_for = None
+            save_data = (ctx.state.term, ctx.state.voted_for)
+
+        if (
+            req.term == ctx.state.term
+            and ctx.state.voted_for in (None, req.candidate_url)
+            and ctx._candidate_log_is_current(req.last_log_term, req.last_log_index)
+        ):
             ctx.state.voted_for = req.candidate_url
             ctx.state.last_heartbeat = time.time()
             vote_granted = True
@@ -122,11 +128,14 @@ def prevote(req: models.VoteRequest):
     """Report whether this node currently appears ready for an election.
 
     A node that believes itself the leader answering this request at all is
-    proof it is still alive, so it must refuse regardless of elapsed time.
+    proof it is still alive, so it must refuse regardless of elapsed time.  A
+    candidate whose log is behind ours could never win the real vote, so it is
+    refused here too rather than letting it bump the term for nothing.
     """
     with ctx.state:
         if ctx.state.leader == ctx.my_url:
             return {"vote_granted": False}
         elapsed = time.time() - ctx.state.last_heartbeat
         timeout = ctx.state.election_timeout
-    return {"vote_granted": elapsed > timeout * 0.5}
+        log_is_current = ctx._candidate_log_is_current(req.last_log_term, req.last_log_index)
+    return {"vote_granted": elapsed > timeout * 0.5 and log_is_current}

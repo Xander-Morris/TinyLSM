@@ -183,6 +183,31 @@ def test_compaction(tmp_path_factory):
         proc2.terminate()
         proc2.wait()
 
+def test_follower_applies_only_after_commit(tmp_path_factory):
+    port = 8600
+    _kill_port(port)
+    url = f"http://localhost:{port}"
+    # Nothing listens here, so this test plays the leader by hand.
+    leader_url = "http://localhost:8609"
+    data_dir = tmp_path_factory.mktemp("commit_gate")
+    proc = _start_node(port, data_dir, leader_url, f"{leader_url},{url}")
+
+    try:
+        # Startup sync retries against the missing leader before serving.
+        assert _wait_healthy(port, timeout=30.0), f"Node on port {port} did not start in time"
+
+        entry = {"operation": "set", "key": "pending", "value": "v", "index": 1, "term": 1}
+        assert requests.post(f"{url}/replicate", json=entry, timeout=2).json()["log_index"] == 1
+
+        # Holding the entry is not the same as committing it.
+        assert requests.get(f"{url}/get", params={"key": "pending"}, timeout=2).json()["value"] is None
+
+        requests.post(f"{url}/heartbeat", json={"leader_url": leader_url, "term": 1, "entries": [], "commit_index": 1}, timeout=2)
+        assert requests.get(f"{url}/get", params={"key": "pending"}, timeout=2).json()["value"] == "v"
+    finally:
+        proc.terminate()
+        proc.wait()
+
 def _start_three_node_cluster(tmp_path_factory, ports, prefix):
     leader_url = f"http://localhost:{ports[0]}"
     two_nodes = f"http://localhost:{ports[0]},http://localhost:{ports[1]}"

@@ -12,7 +12,10 @@ class RaftState:
     nodes: list = dataclasses.field(default_factory=list)
     log: list = dataclasses.field(default_factory=list)
     log_index: int = 0
+    commit_index: int = 0
+    last_applied: int = 0
     snapshot_index: int = 0
+    snapshot_term: int = 0
     follower_indices: dict = dataclasses.field(default_factory=dict)
     last_heartbeat: float = 0.0
     election_timeout: float = 1.0

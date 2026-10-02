@@ -28,17 +28,19 @@ app.include_router(router)
 def _send_heartbeats():
     """Continuously send the leader's log tail to every reachable follower."""
     def _heartbeat_one(node_url):
-        """Send the follower only the log suffix it has not acknowledged."""
+        """Send the follower the entries it lacks plus the leader's commit index."""
         try:
             with ctx.state:
                 follower_index = ctx.state.follower_indices.get(node_url, 0)
-                entries_to_send = list(ctx.state.log[follower_index:])
+                entries_to_send = [e for e in ctx.state.log if e["index"] > follower_index]
                 current_term = ctx.state.term
+                commit_index = ctx.state.commit_index
 
             response = requests.post(f"{node_url}/heartbeat", json={
                 "leader_url": ctx.my_url,
                 "term": current_term,
                 "entries": entries_to_send,
+                "commit_index": commit_index,
             }, timeout=0.1)
 
             with ctx.state:
@@ -62,6 +64,7 @@ def _send_heartbeats():
             t.start()
         for t in threads:
             t.join()
+        ctx._advance_commit_index()
         time.sleep(0.15)
 
 
@@ -79,13 +82,19 @@ def _start_election():
         with ctx.state:
             nodes_copy = list(ctx.state.nodes)
             majority = (len(ctx.state.nodes) // 2) + 1
+            last_log_term, last_log_index = ctx._last_log_position()
 
         def _request_vote(node_url):
             """Ask one peer to support this candidate for ``vote_term``."""
             nonlocal votes
             try:
                 endpoint = "/prevote" if prevote else "/vote"
-                response = requests.post(f"{node_url}{endpoint}", json={"candidate_url": ctx.my_url, "term": vote_term}, timeout=0.2)
+                response = requests.post(f"{node_url}{endpoint}", json={
+                    "candidate_url": ctx.my_url,
+                    "term": vote_term,
+                    "last_log_index": last_log_index,
+                    "last_log_term": last_log_term,
+                }, timeout=0.2)
                 if response.json().get("vote_granted"):
                     with votes_lock:
                         votes += 1
@@ -156,20 +165,23 @@ if __name__ == "__main__":
                 delay=0.5,
             )
 
-            def _replay(entries_list):
-                """Apply synchronized entries in log order during node startup."""
-                for entry in entries_list:
-                    ctx._handle_operation(entry["operation"], entry["key"], entry["value"])
-                    ctx.state.log.append(entry)
-                    ctx.state.log_index = entry["index"]
-
             if response and "snapshot" in response:
-                for key, value in response["snapshot"]["data"].items():
+                snapshot = response["snapshot"]
+                for key, value in snapshot["data"].items():
                     ctx.store.set(key, value)
-                ctx.state.log_index = response["snapshot"]["index"]
+                # Everything this node held locally is older than the leader's
+                # snapshot, so the snapshot replaces it on disk too.
+                ctx._write_snapshot(snapshot["index"], snapshot.get("term", 0), snapshot["data"])
+                ctx._rewrite_log_file([])
+                ctx.state.log.clear()
+                ctx.state.log_index = ctx.state.snapshot_index = snapshot["index"]
+                ctx.state.commit_index = ctx.state.last_applied = snapshot["index"]
+                ctx.state.snapshot_term = snapshot.get("term", 0)
 
             if response:
-                _replay(response["entries"])
+                log_index = ctx._append_entries(response["entries"])
+                ctx.state.commit_index = max(ctx.state.commit_index, min(response.get("commit_index", 0), log_index))
+                ctx._apply_committed()
         except Exception:
             pass
 
