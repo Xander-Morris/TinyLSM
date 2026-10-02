@@ -281,10 +281,12 @@ def do_replicated_operation(operation: Literal["set", "delete", "add_node", "rem
 
     # A follower that refused the entry because an earlier one was still in
     # flight picks it up on the next heartbeat, which can commit it for us.
+    # Wait on last_applied, not commit_index: the heartbeat thread raises
+    # commit_index before it applies, and the client must be able to read its write.
     deadline = time.time() + COMMIT_WAIT_SECONDS
     while True:
         with state:
-            committed = state.commit_index >= current_index
+            committed = state.last_applied >= current_index
         if committed or time.time() >= deadline:
             break
         time.sleep(0.02)

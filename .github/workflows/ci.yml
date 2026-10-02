@@ -45,7 +45,9 @@ jobs:
           curl -sf -X POST http://localhost:8000/set \
             -H "Content-Type: application/json" \
             -d '{"key":"ci","value":"ok"}'
-          result=$(curl -sf "http://localhost:8001/get?key=ci")
+          # Followers apply a write only after the next heartbeat carries the
+          # leader's commit index, so a plain follower read can still be stale.
+          result=$(curl -sf "http://localhost:8001/get?key=ci&consistent=true")
           echo "$result"
           echo "$result" | grep -q '"value":"ok"'
           docker compose down
